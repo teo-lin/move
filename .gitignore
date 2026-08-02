@@ -1,34 +1,62 @@
-# Gradle files
-.gradle/
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# React Native / Metro
+.metro-health-check*
+.expo/
+.expo-shared/
+
+# Build output
 build/
-
-# Local configuration file (sdk path, etc)
-local.properties
-
-# Log/OS Files
-*.log
-
-# Android Studio generated files and folders
-captures/
-.externalNativeBuild/
-.cxx/
-*.aab
+dist/
+coverage/
 *.apk
+*.aab
 output-metadata.json
 
-# IntelliJ
-*.iml
-.idea/
-misc.xml
-deploymentTargetDropDown.xml
-render.experimental.xml
+# Android / Gradle
+.gradle/
+local.properties
+.externalNativeBuild/
+.cxx/
+captures/
+*.hprof
 
-# Keystore files
+# iOS / Xcode / CocoaPods
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/*.xcworkspace/xcuserdata/
+ios/*.xcodeproj/xcuserdata/
+ios/*.xcodeproj/project.xcworkspace/xcuserdata/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+
+# Signing and secrets
 *.jks
 *.keystore
-
-# Google Services (e.g. APIs or Firebase)
+keystore.properties
 google-services.json
+GoogleService-Info.plist
+.env
+.env.*
+!.env.example
 
-# Android Profiling
-*.hprof
+# Logs and reports
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editors and OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

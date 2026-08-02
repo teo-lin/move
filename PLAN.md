@@ -1,4 +1,4 @@
-# Kineto Private App Plan
+# Move Private App Plan
 
 ## Context
 
@@ -24,13 +24,32 @@ Goal: produce a minimal APK that can be installed on Android phones from GitHub 
 
    - Exercise catalog screen.
    - Exercise detail screen with bundled GIF.
-   - Hardcoded workout runner for at least the two current routines:
+   - Guided workout runner for at least the two current routines:
      - `PeSpate: abs`
      - `PatruLabe: upper body`
    - Local session history.
+   - Per-exercise workout settings:
+     - repetitions
+     - seconds per repetition
+     - position/order in the workout
+     - optional two-sided midpoint cue
+   - Audio guidance:
+     - speak exercise name
+     - five countdown clicks
+     - speak "Go"
+     - repetition rhythm chimes
+     - "Change side" cue and second countdown for two-sided exercises
+     - distinct end-of-exercise chime
+   - Runner controls:
+     - previous
+     - repeat
+     - pause/resume
+     - next
+     - finish workout
+   - No per-exercise complete button; the workout auto-advances and auto-records stats when finished.
 4. Sign APKs for private distribution.
 
-   - Create one release keystore outside git, for example `C:\_____\_SECRETS\kineto-release.jks`.
+   - Create one release keystore outside git, for example `C:\_____\_SECRETS\move-release.jks`.
    - Keep `keystore.properties` out of git.
    - Use the same signing key for all updates so Android can install upgrades cleanly.
 5. Test install paths.
@@ -43,7 +62,7 @@ Goal: produce a minimal APK that can be installed on Android phones from GitHub 
    - Confirm the app launches and data persists after restart.
 6. Distribute through GitHub Releases.
 
-   - Attach versioned APKs, for example `kineto-v0.1.0.apk`.
+   - Attach versioned APKs, for example `move-v0.1.0.apk`.
    - On phones, enable "Install unknown apps" for the browser or file manager used to open the APK.
    - Do not implement in-app update checks initially, to preserve the no-server-call rule.
 
@@ -113,14 +132,14 @@ Rows should be generated from the app's local session history, not from ADB UI s
 
 Implement a simple no-server sync path first:
 
-- export CSV to a predictable folder, such as `Download/kineto/back-exercises.csv`
+- export CSV to a predictable folder, such as `Download/move/back-exercises.csv`
 - support Android share sheet if useful
 - support ADB pull into the health repo
 
 Target command:
 
 ```powershell
-adb pull /sdcard/Download/kineto/back-exercises.csv C:\_____\_CODE\body\baseline\back-exercises.csv
+adb pull /sdcard/Download/move/back-exercises.csv C:\_____\_CODE\body\baseline\back-exercises.csv
 ```
 
 Optional later: add a script in `C:\_____\_CODE\body\scripts` that pulls the exported CSV and merges it with existing metrics.
