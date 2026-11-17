@@ -8,7 +8,9 @@ type MoveStorageModule = {
   click(): Promise<boolean>;
   repChime(): Promise<boolean>;
   finishChime(): Promise<boolean>;
+  restChime(): Promise<boolean>;
   stopAudio(): Promise<boolean>;
+  setKeepAwake(enabled: boolean): Promise<boolean>;
 };
 
 export const MoveStorage = NativeModules.MoveStorage as MoveStorageModule;

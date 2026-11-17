@@ -126,6 +126,7 @@ const exercise117 = require('../../assets/exercises/117 Arm raises.gif');
 const exercise118 = require('../../assets/exercises/118 Lunges.gif');
 const exercise119 = require('../../assets/exercises/119 Roll Up.gif');
 const exercise120 = require('../../assets/exercises/120 Roll Down.gif');
+const exercise121 = require('../../assets/exercises/121 Wall push-up.gif');
 
 export const exercises: Exercise[] = [
   { id: 1, name: "Lumbar Flattening", asset: exercise1 },
@@ -248,6 +249,7 @@ export const exercises: Exercise[] = [
   { id: 118, name: "Lunges", asset: exercise118 },
   { id: 119, name: "Roll Up", asset: exercise119 },
   { id: 120, name: "Roll Down", asset: exercise120 },
+  { id: 121, name: "Wall push-up", asset: exercise121 },
 ];
 
 export const exercisesById = new Map(exercises.map(exercise => [exercise.id, exercise]));

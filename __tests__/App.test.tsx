@@ -8,10 +8,12 @@ import App from '../App';
 import {MoveStorage} from '../src/native/MoveStorage';
 
 jest.mock('../src/data/workouts', () => ({
+  ...jest.requireActual('../src/data/workouts'),
   workouts: [
     {
       id: 'test-workout',
       name: 'Test Workout',
+      restSeconds: 3,
       steps: [
         {exerciseId: 3, repetitions: 2, secondsPerRep: 1, twoSides: true},
         {exerciseId: 6, repetitions: 1, secondsPerRep: 1},
@@ -29,7 +31,9 @@ jest.mock('../src/native/MoveStorage', () => ({
     click: jest.fn(() => Promise.resolve(true)),
     repChime: jest.fn(() => Promise.resolve(true)),
     finishChime: jest.fn(() => Promise.resolve(true)),
+    restChime: jest.fn(() => Promise.resolve(true)),
     stopAudio: jest.fn(() => Promise.resolve(true)),
+    setKeepAwake: jest.fn(() => Promise.resolve(true)),
   },
 }));
 
@@ -79,11 +83,17 @@ test('auto-advances once after a two-sided exercise finishes', async () => {
     await Promise.resolve();
   });
 
-  await advancePlayback(19000);
+  await advancePlayback(25000);
 
   expect(moveStorageMock.speak).toHaveBeenCalledWith('Windshield Wipers');
   expect(moveStorageMock.speak).toHaveBeenCalledWith('Change side');
   expect(moveStorageMock.speak).toHaveBeenCalledWith('Straight Leg Scissors');
-  expect(moveStorageMock.repChime).toHaveBeenCalledTimes(2);
+  // Two reps, two-sided: the first rep chimes, the last rep is marked by the finish chime.
+  expect(moveStorageMock.repChime).toHaveBeenCalledTimes(1);
   expect(moveStorageMock.finishChime).toHaveBeenCalledTimes(1);
+  // A 3 s catch-your-breath break separates the exercises.
+  expect(moveStorageMock.speak).toHaveBeenCalledWith('Catch your breath');
+  expect(moveStorageMock.restChime).toHaveBeenCalledTimes(1);
+  // The screen is kept on while the workout runs.
+  expect(moveStorageMock.setKeepAwake).toHaveBeenCalledWith(true);
 });

@@ -2,11 +2,10 @@ package app.move.kineto
 
 import android.content.ContentValues
 import android.content.Context
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.os.Environment
 import android.provider.MediaStore
 import android.speech.tts.TextToSpeech
+import android.view.WindowManager
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -16,7 +15,7 @@ import java.util.Locale
 class MoveStorageModule(private val reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext), TextToSpeech.OnInitListener {
 
-  private val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 85)
+  private val cues = CueSounds(reactContext)
   private var tts: TextToSpeech? = TextToSpeech(reactContext, this)
   private var ttsReady = false
 
@@ -87,33 +86,57 @@ class MoveStorageModule(private val reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun click(promise: Promise) {
-    tone.startTone(ToneGenerator.TONE_PROP_BEEP, 90)
+    cues.play("tick")
     promise.resolve(true)
   }
 
   @ReactMethod
   fun repChime(promise: Promise) {
-    tone.startTone(ToneGenerator.TONE_PROP_ACK, 120)
+    cues.play("rep")
     promise.resolve(true)
   }
 
   @ReactMethod
   fun finishChime(promise: Promise) {
-    tone.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 260)
+    cues.play("finish")
+    promise.resolve(true)
+  }
+
+  @ReactMethod
+  fun restChime(promise: Promise) {
+    cues.play("rest")
     promise.resolve(true)
   }
 
   @ReactMethod
   fun stopAudio(promise: Promise) {
     tts?.stop()
-    tone.stopTone()
+    cues.stop()
     promise.resolve(true)
+  }
+
+  /** Keeps the screen on (no dimming, no timeout) while a workout is running. */
+  @ReactMethod
+  fun setKeepAwake(enabled: Boolean, promise: Promise) {
+    val activity = reactContext.currentActivity
+    if (activity == null) {
+      promise.resolve(false)
+      return
+    }
+    activity.runOnUiThread {
+      if (enabled) {
+        activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      } else {
+        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      }
+      promise.resolve(true)
+    }
   }
 
   override fun invalidate() {
     super.invalidate()
     tts?.shutdown()
     tts = null
-    tone.release()
+    cues.release()
   }
 }

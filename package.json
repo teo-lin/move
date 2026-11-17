@@ -1,6 +1,6 @@
 {
   "name": "app.move.kineto",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
@@ -10,7 +10,11 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "sync:csv": "node scripts/sync-back-exercises.mjs",
+    "generate:icon": "python scripts/make-launcher-icon.py",
+    "build:android:release": "cd android && gradlew.bat assembleRelease",
+    "install:android:release": "adb install -r android/app/build/outputs/apk/release/app-release.apk"
   },
   "dependencies": {
     "react": "19.2.3",
