@@ -42,7 +42,7 @@ import {
   toBackExercisesCsv,
   weekdayLabels,
 } from './src/data/history';
-import {MoveStorage} from './src/native/MoveStorage';
+import {MoveStorage, SpeechSettings} from './src/native/MoveStorage';
 
 type Screen = 'workouts' | 'catalog' | 'history' | 'stats';
 type Phase = 'announce' | 'countdown' | 'work' | 'change-side' | 'finishing' | 'rest';
@@ -118,13 +118,28 @@ export default function App(): React.JSX.Element {
     }
 
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+    // Speak, then continue only once the voice has finished (never talk over the countdown).
+    const speakThen = (text: string, next: () => void, gapMs: number) => {
+      MoveStorage.speak(text)
+        .catch(() => undefined)
+        .then(() => {
+          if (!cancelled) {
+            timer = setTimeout(next, gapMs);
+          }
+        });
+    };
 
     if (phase === 'announce') {
-      fire(MoveStorage.speak(exercisesById.get(activeStep.exerciseId)?.name ?? 'Exercise'));
-      timer = setTimeout(() => {
-        setCountdown(5);
-        setPhase('countdown');
-      }, 1600);
+      const name = exercisesById.get(activeStep.exerciseId)?.name ?? 'Exercise';
+      speakThen(
+        activeStep.twoSides ? `${name}, left` : name,
+        () => {
+          setCountdown(5);
+          setPhase('countdown');
+        },
+        400,
+      );
     }
 
     if (phase === 'countdown') {
@@ -143,12 +158,15 @@ export default function App(): React.JSX.Element {
     }
 
     if (phase === 'change-side') {
-      fire(MoveStorage.speak('Change side'));
-      timer = setTimeout(() => {
-        setSideChanged(true);
-        setCountdown(5);
-        setPhase('countdown');
-      }, 1400);
+      speakThen(
+        'Right side',
+        () => {
+          setSideChanged(true);
+          setCountdown(5);
+          setPhase('countdown');
+        },
+        400,
+      );
     }
 
     if (phase === 'work') {
@@ -190,6 +208,7 @@ export default function App(): React.JSX.Element {
     }
 
     return () => {
+      cancelled = true;
       if (timer) {
         clearTimeout(timer);
       }
@@ -219,7 +238,7 @@ export default function App(): React.JSX.Element {
 
   function startRest(seconds: number) {
     fire(MoveStorage.stopAudio());
-    fire(MoveStorage.speak('Catch your breath'));
+    fire(MoveStorage.speak('Rest'));
     setRestTotal(seconds);
     setRestRemaining(seconds);
     setRep(0);
@@ -437,12 +456,18 @@ export default function App(): React.JSX.Element {
               )}
             </View>
           ) : activeExercise ? (
-            <ExercisePreview exercise={activeExercise} large />
+            <ExercisePreview exercise={activeExercise} fill />
           ) : (
             <Text style={styles.bodyText}>Missing exercise.</Text>
           )}
           {phase !== 'rest' && (
             <>
+              {activeStep.twoSides && (
+                <View style={styles.sideRow}>
+                  <Text style={[styles.sideBadge, !sideChanged && styles.sideBadgeActive]}>Left</Text>
+                  <Text style={[styles.sideBadge, sideChanged && styles.sideBadgeActive]}>Right</Text>
+                </View>
+              )}
               <RepProgress
                 key={`${activeIndex}-${sideChanged}`}
                 step={activeStep}
@@ -873,7 +898,88 @@ function StatsScreen({
         <Action label="Export CSV" onPress={onExport} />
         <Action label="Share CSV" onPress={onShare} />
       </View>
+      <VoiceSettings />
     </ScrollView>
+  );
+}
+
+const VOICE_SAMPLE = 'Diagonal crunches, left. Go.';
+
+function VoiceSettings() {
+  const [settings, setSettings] = useState<SpeechSettings | null>(null);
+
+  const reload = () =>
+    MoveStorage.getSpeechSettings()
+      .then(setSettings)
+      .catch(() => setSettings(null));
+
+  useEffect(() => {
+    reload();
+  }, []);
+
+  if (!settings) {
+    return null;
+  }
+
+  const pickEngine = async (name: string) => {
+    await MoveStorage.setSpeechEngine(name);
+    await reload();
+    fire(MoveStorage.speak(VOICE_SAMPLE));
+  };
+  const pickVoice = async (name: string) => {
+    await MoveStorage.setSpeechVoice(name);
+    await reload();
+    fire(MoveStorage.speak(VOICE_SAMPLE));
+  };
+  const changeRate = async (delta: number) => {
+    await MoveStorage.setSpeechRate(Math.round((settings.rate + delta) * 100) / 100);
+    await reload();
+    fire(MoveStorage.speak(VOICE_SAMPLE));
+  };
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>Voice</Text>
+      <Text style={styles.meta}>Offline voices on this phone. Tap one to hear it.</Text>
+      <View style={styles.chipRow}>
+        {settings.engines.map(engine => (
+          <Chip
+            key={engine.name}
+            label={engine.label}
+            active={engine.name === settings.engine}
+            onPress={() => pickEngine(engine.name)}
+          />
+        ))}
+      </View>
+      <View style={styles.chipRow}>
+        {settings.voices.map(voice => (
+          <Chip
+            key={voice.name}
+            label={`${voice.locale} · ${voice.name.replace(/^[a-z]{2}-[a-z]{2}-x-/, '')}`}
+            active={voice.name === settings.voice}
+            onPress={() => pickVoice(voice.name)}
+          />
+        ))}
+      </View>
+      <View style={styles.smallControlRow}>
+        <SmallButton label="slower" onPress={() => changeRate(-0.05)} />
+        <Text style={styles.bodyText}>speed {settings.rate.toFixed(2)}</Text>
+        <SmallButton label="faster" onPress={() => changeRate(0.05)} />
+        <SmallButton label="test" onPress={() => fire(MoveStorage.speak(VOICE_SAMPLE))} />
+      </View>
+    </View>
+  );
+}
+
+function Chip({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
+  return (
+    <Pressable
+      style={[styles.chip, active && styles.chipActive]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}>
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -910,10 +1016,23 @@ function ExerciseRow({exercise, onPress}: {exercise: Exercise; onPress: () => vo
   );
 }
 
-function ExercisePreview({exercise, large = false}: {exercise: Exercise; large?: boolean}) {
+/** `fill`: grow/shrink with the runner's free space; `large`: fixed tall image (scroll views). */
+function ExercisePreview({
+  exercise,
+  large = false,
+  fill = false,
+}: {
+  exercise: Exercise;
+  large?: boolean;
+  fill?: boolean;
+}) {
   return (
-    <View style={styles.preview}>
-      <Image source={exercise.asset} style={large ? styles.previewImageLarge : styles.previewImage} resizeMode="contain" />
+    <View style={fill ? styles.previewFill : styles.preview}>
+      <Image
+        source={exercise.asset}
+        style={fill ? styles.previewImageFill : large ? styles.previewImageLarge : styles.previewImage}
+        resizeMode="contain"
+      />
       <Text style={styles.cardTitle}>
         {exerciseLabel(exercise.id)} {exercise.name}
       </Text>
@@ -1144,6 +1263,62 @@ const styles = StyleSheet.create({
   previewImageLarge: {
     width: '100%',
     height: 420,
+  },
+  previewFill: {
+    flex: 1,
+    minHeight: 0,
+    alignItems: 'center',
+    gap: 12,
+  },
+  previewImageFill: {
+    width: '100%',
+    flex: 1,
+    minHeight: 0,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  chip: {
+    borderWidth: 1,
+    borderColor: '#c8d8e8',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#f7fbff',
+  },
+  chipActive: {
+    borderColor: '#168f5c',
+    backgroundColor: '#eaf7f1',
+  },
+  chipText: {
+    color: '#226fb8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  chipTextActive: {
+    color: '#126b46',
+  },
+  sideRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  sideBadge: {
+    minWidth: 96,
+    textAlign: 'center',
+    paddingVertical: 6,
+    borderRadius: 16,
+    overflow: 'hidden',
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#9aa4ad',
+    backgroundColor: '#edf0f2',
+  },
+  sideBadgeActive: {
+    color: '#ffffff',
+    backgroundColor: '#226fb8',
   },
   runner: {
     flex: 1,

@@ -4,29 +4,20 @@ import android.content.ContentValues
 import android.content.Context
 import android.os.Environment
 import android.provider.MediaStore
-import android.speech.tts.TextToSpeech
 import android.view.WindowManager
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import java.util.Locale
 
 class MoveStorageModule(private val reactContext: ReactApplicationContext) :
-  ReactContextBaseJavaModule(reactContext), TextToSpeech.OnInitListener {
+  ReactContextBaseJavaModule(reactContext) {
 
   private val cues = CueSounds(reactContext)
-  private var tts: TextToSpeech? = TextToSpeech(reactContext, this)
-  private var ttsReady = false
+  private val speech = Speech(reactContext)
 
   override fun getName(): String = "MoveStorage"
-
-  override fun onInit(status: Int) {
-    ttsReady = status == TextToSpeech.SUCCESS
-    if (ttsReady) {
-      tts?.language = Locale.UK
-    }
-  }
 
   @ReactMethod
   fun getString(key: String, promise: Promise) {
@@ -75,12 +66,51 @@ class MoveStorageModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
+  /** Resolves when the utterance has finished (or was interrupted). */
   @ReactMethod
   fun speak(text: String, promise: Promise) {
-    val engine = tts
-    if (engine != null && ttsReady) {
-      engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "move-${System.nanoTime()}")
+    speech.speak(text) { promise.resolve(true) }
+  }
+
+  @ReactMethod
+  fun getSpeechSettings(promise: Promise) {
+    val result = Arguments.createMap()
+    result.putString("engine", speech.engineName)
+    result.putString("voice", speech.voiceName)
+    result.putDouble("rate", speech.rate.toDouble())
+    val engines = Arguments.createArray()
+    speech.engines().forEach { engine ->
+      engines.pushMap(Arguments.createMap().apply {
+        putString("name", engine.name)
+        putString("label", engine.label)
+      })
     }
+    result.putArray("engines", engines)
+    val voices = Arguments.createArray()
+    speech.voices().forEach { voice ->
+      voices.pushMap(Arguments.createMap().apply {
+        putString("name", voice.name)
+        putString("locale", voice.locale)
+        putInt("quality", voice.quality)
+      })
+    }
+    result.putArray("voices", voices)
+    promise.resolve(result)
+  }
+
+  @ReactMethod
+  fun setSpeechEngine(name: String, promise: Promise) {
+    speech.setEngine(name) { promise.resolve(true) }
+  }
+
+  @ReactMethod
+  fun setSpeechVoice(name: String, promise: Promise) {
+    promise.resolve(speech.setVoice(name))
+  }
+
+  @ReactMethod
+  fun setSpeechRate(rate: Double, promise: Promise) {
+    speech.setRate(rate.toFloat())
     promise.resolve(true)
   }
 
@@ -110,7 +140,7 @@ class MoveStorageModule(private val reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun stopAudio(promise: Promise) {
-    tts?.stop()
+    speech.stop()
     cues.stop()
     promise.resolve(true)
   }
@@ -135,8 +165,7 @@ class MoveStorageModule(private val reactContext: ReactApplicationContext) :
 
   override fun invalidate() {
     super.invalidate()
-    tts?.shutdown()
-    tts = null
+    speech.shutdown()
     cues.release()
   }
 }

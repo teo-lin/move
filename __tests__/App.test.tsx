@@ -34,6 +34,7 @@ jest.mock('../src/native/MoveStorage', () => ({
     restChime: jest.fn(() => Promise.resolve(true)),
     stopAudio: jest.fn(() => Promise.resolve(true)),
     setKeepAwake: jest.fn(() => Promise.resolve(true)),
+    getSpeechSettings: jest.fn(() => Promise.reject(new Error('not in tests'))),
   },
 }));
 
@@ -85,14 +86,14 @@ test('auto-advances once after a two-sided exercise finishes', async () => {
 
   await advancePlayback(25000);
 
-  expect(moveStorageMock.speak).toHaveBeenCalledWith('Windshield Wipers');
-  expect(moveStorageMock.speak).toHaveBeenCalledWith('Change side');
+  expect(moveStorageMock.speak).toHaveBeenCalledWith('Windshield Wipers, left');
+  expect(moveStorageMock.speak).toHaveBeenCalledWith('Right side');
   expect(moveStorageMock.speak).toHaveBeenCalledWith('Straight Leg Scissors');
   // Two reps, two-sided: the first rep chimes, the last rep is marked by the finish chime.
   expect(moveStorageMock.repChime).toHaveBeenCalledTimes(1);
   expect(moveStorageMock.finishChime).toHaveBeenCalledTimes(1);
   // A 3 s catch-your-breath break separates the exercises.
-  expect(moveStorageMock.speak).toHaveBeenCalledWith('Catch your breath');
+  expect(moveStorageMock.speak).toHaveBeenCalledWith('Rest');
   expect(moveStorageMock.restChime).toHaveBeenCalledTimes(1);
   // The screen is kept on while the workout runs.
   expect(moveStorageMock.setKeepAwake).toHaveBeenCalledWith(true);

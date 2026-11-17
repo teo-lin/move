@@ -14,7 +14,8 @@
     "sync:csv": "node scripts/sync-back-exercises.mjs",
     "generate:icon": "python scripts/make-launcher-icon.py",
     "build:android:release": "cd android && gradlew.bat assembleRelease",
-    "install:android:release": "adb install -r android/app/build/outputs/apk/release/app-release.apk"
+    "install:android:release": "adb install -r android/app/build/outputs/apk/release/app-release.apk",
+    "generate:sounds": "python scripts/make-cue-sounds.py"
   },
   "dependencies": {
     "react": "19.2.3",
