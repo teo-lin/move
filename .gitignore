@@ -60,3 +60,6 @@ pnpm-debug.log*
 *.iml
 .DS_Store
 Thumbs.db
+
+# AI generation review output
+out/

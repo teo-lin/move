@@ -177,16 +177,10 @@ export default function App(): React.JSX.Element {
   }, [activeWorkout]);
 
   useEffect(() => {
-    if (
-      detailExerciseId === null &&
-      !editing &&
-      !creatingExercise &&
-      screen !== 'settings' &&
-      screen !== 'catalog'
-    ) {
+    if (detailExerciseId === null && !editing && !creatingExercise && screen !== 'settings') {
       return;
     }
-    // Back: exercise detail -> catalog -> settings -> workouts; editor -> workout list.
+    // Back: exercise detail -> catalog; editor -> workout list; settings -> workouts.
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (detailExerciseId !== null) {
         setDetailExerciseId(null);
@@ -196,8 +190,6 @@ export default function App(): React.JSX.Element {
         setCreatingExercise(false);
       } else if (editing) {
         setEditing(false);
-      } else if (screen === 'catalog') {
-        setScreen('settings');
       } else {
         setScreen('workouts');
       }
@@ -817,49 +809,55 @@ export default function App(): React.JSX.Element {
             );
             const last = done.reduce((latest, entry) => Math.max(latest, entry.timestamp), 0);
             return (
-              <Textured
-                style={styles.workoutCard}
-                background={backgroundFor(workout.id)}
-                key={workout.id}>
-                <View style={styles.workoutInfo}>
-                  <Text
-                    style={styles.cardTitle}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.75}>
-                    {label}
-                  </Text>
-                  <Text style={styles.stepMeta} numberOfLines={1}>
-                    {exerciseCount(workout)} exercises · ~
-                    {Math.round(estimateSeconds(workout) / 60)} min ·{' '}
-                    {done.length === 0
-                      ? 'not done yet'
-                      : `${done.length}× · last ${formatDisplayDate(last).slice(0, 5)}`}
-                  </Text>
-                </View>
-                <View style={styles.workoutButtons}>
-                  <Pressable
-                    style={styles.workoutButton}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Start ${label}`}
-                    onPress={() => {
-                      setSelectedWorkoutId(workout.id);
-                      startWorkout(workout);
-                    }}>
-                    <Icon name="symbolPlay" size={20} color="#1f2d38" />
-                  </Pressable>
-                  <Pressable
-                    style={styles.workoutButton}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Edit ${label}`}
-                    onPress={() => {
-                      setSelectedWorkoutId(workout.id);
-                      setEditing(true);
-                    }}>
-                    <Icon name="symbolEdit" size={15} color="#1f2d38" />
-                  </Pressable>
-                </View>
-              </Textured>
+              <Pressable
+                key={workout.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${label}`}
+                onPress={() => {
+                  setSelectedWorkoutId(workout.id);
+                  setEditing(true);
+                }}>
+                <Textured style={styles.workoutCard} background={backgroundFor(workout.id)}>
+                  <View style={styles.workoutInfo}>
+                    <Text
+                      style={styles.cardTitle}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.75}>
+                      {label}
+                    </Text>
+                    <Text style={styles.stepMeta} numberOfLines={1}>
+                      {exerciseCount(workout)} exercises · ~
+                      {Math.round(estimateSeconds(workout) / 60)} min ·{' '}
+                      {done.length === 0
+                        ? 'not done yet'
+                        : `${done.length}× · last ${formatDisplayDate(last).slice(0, 5)}`}
+                    </Text>
+                  </View>
+                  <View style={styles.workoutButtons}>
+                    <Pressable
+                      style={styles.workoutButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Start ${label}`}
+                      onPress={() => {
+                        setSelectedWorkoutId(workout.id);
+                        startWorkout(workout);
+                      }}>
+                      <Icon name="symbolPlay" size={20} color="#1f2d38" />
+                    </Pressable>
+                    <Pressable
+                      style={styles.workoutButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit ${label}`}
+                      onPress={() => {
+                        setSelectedWorkoutId(workout.id);
+                        setEditing(true);
+                      }}>
+                      <Icon name="symbolEdit" size={15} color="#1f2d38" />
+                    </Pressable>
+                  </View>
+                </Textured>
+              </Pressable>
             );
           })}
         </ScrollView>
@@ -1070,7 +1068,6 @@ export default function App(): React.JSX.Element {
 
       {screen === 'catalog' && !detailExercise && (
         <ScrollView contentContainerStyle={styles.content}>
-          <SmallButton label="‹ Settings" onPress={() => navigate('settings')} />
           <CatalogGrid
             exercises={allExercises}
             onPress={exercise => setDetailExerciseId(exercise.id)}
@@ -1130,14 +1127,6 @@ export default function App(): React.JSX.Element {
       {screen === 'settings' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.cardTitle}>Settings</Text>
-          <Pressable
-            style={styles.card}
-            accessibilityRole="button"
-            accessibilityLabel="Exercise catalog"
-            onPress={() => navigate('catalog')}>
-            <Text style={styles.cardTitle}>Exercise catalog ›</Text>
-            <Text style={styles.meta}>{allExercises.length} exercises with their animations</Text>
-          </Pressable>
           <VoiceSettings />
         </ScrollView>
       )}
@@ -1202,11 +1191,7 @@ function Shell({
             accessibilityRole="button"
             accessibilityLabel="Settings"
             onPress={() => setScreen('settings')}>
-            <Icon
-              name="settings"
-              size={28}
-              color={screen === 'settings' || screen === 'catalog' ? '#126b46' : '#52606d'}
-            />
+            <Icon name="settings" size={28} color={screen === 'settings' ? '#126b46' : '#52606d'} />
           </Pressable>
         </View>
         <View style={styles.tabs}>
@@ -1214,6 +1199,11 @@ function Shell({
             label="Workouts"
             active={screen === 'workouts'}
             onPress={() => setScreen('workouts')}
+          />
+          <Tab
+            label="Exercises"
+            active={screen === 'catalog'}
+            onPress={() => setScreen('catalog')}
           />
           <Tab label="History" active={screen === 'history'} onPress={() => setScreen('history')} />
           <Tab label="Stats" active={screen === 'stats'} onPress={() => setScreen('stats')} />
