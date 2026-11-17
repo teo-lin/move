@@ -8,11 +8,23 @@ import {
   startOfWeek,
   toBackExercisesCsv,
 } from '../src/data/history';
-import {csvWorkoutLabel, mergeSavedWorkouts, serializeWorkoutSettings, workouts} from '../src/data/workouts';
+import {
+  csvWorkoutLabel,
+  mergeSavedWorkouts,
+  serializeWorkoutSettings,
+  workouts,
+} from '../src/data/workouts';
 import {exercisesById} from '../src/data/exercises';
 
 function entry(id: string, date: Date, workout: string, seconds = 884): SessionEntry {
-  return {id, timestamp: date.getTime(), workout, completed: 16, total: 16, durationSeconds: seconds};
+  return {
+    id,
+    timestamp: date.getTime(),
+    workout,
+    completed: 16,
+    total: 16,
+    durationSeconds: seconds,
+  };
 }
 
 test('dates: CSV keeps yyyy.MM.dd, UI shows dd.MM.yyyy', () => {
@@ -72,7 +84,10 @@ test('every routine references a bundled exercise, including the new 121 Wall pu
   expect(exercisesById.get(121)?.name).toBe('Wall push-up');
   // Scanned from the original app: per-side moves.
   const sided = (id: string) =>
-    workouts.find(w => w.id === id)!.steps.filter(s => s.twoSides).map(s => s.exerciseId);
+    workouts
+      .find(w => w.id === id)!
+      .steps.filter(s => s.twoSides)
+      .map(s => s.exerciseId);
   expect(sided('pespate-abs')).toEqual([7, 39, 34, 36]);
   expect(sided('patrulabe-upper-body')).toEqual([52]);
   expect(workouts.map(w => w.id)).toEqual(
@@ -90,8 +105,56 @@ test('saved step settings override defaults and survive bad input', () => {
     workouts.find(w => w.id === 'core-first-b')?.steps,
   );
   const withRest = mergeSavedWorkouts(
-    serializeWorkoutSettings(workouts.map(w => (w.id === 'office-micro' ? {...w, restSeconds: 15} : w))),
+    serializeWorkoutSettings(
+      workouts.map(w => (w.id === 'office-micro' ? {...w, restSeconds: 15} : w)),
+    ),
   );
   expect(withRest.find(w => w.id === 'office-micro')?.restSeconds).toBe(15);
   expect(mergeSavedWorkouts('not json')).toBe(workouts);
+});
+
+test('custom workouts are saved in full and restored after the bundled ones', () => {
+  const custom = {
+    id: 'custom-1',
+    name: 'Evening',
+    custom: true,
+    steps: [{exerciseId: 1000, repetitions: 10, secondsPerRep: 3}],
+  };
+  const restored = mergeSavedWorkouts(serializeWorkoutSettings([...workouts, custom]));
+  expect(restored.slice(0, workouts.length).map(w => w.id)).toEqual(workouts.map(w => w.id));
+  expect(restored[workouts.length]).toMatchObject({id: 'custom-1', name: 'Evening', custom: true});
+  expect(restored[workouts.length].steps[0].exerciseId).toBe(1000);
+});
+
+test('every workout gets its own random background while unused ones remain', () => {
+  const {assignCardBackgrounds} = require('../src/ui/backgrounds');
+  const ids = Array.from({length: 21}, (_, i) => `w${i}`);
+  const assigned = assignCardBackgrounds({}, ids);
+  expect(new Set(Object.values(assigned)).size).toBe(21);
+  expect(assignCardBackgrounds(assigned, ids)).toBe(assigned); // stable once assigned
+  const more = assignCardBackgrounds(assigned, [...ids, 'w21']);
+  expect(more.w21).toBeGreaterThanOrEqual(0);
+});
+
+test('history sessions get varied backgrounds that never repeat back to back', () => {
+  const {sessionBackgroundMap} = require('../src/ui/backgrounds');
+  const sessions = Array.from({length: 30}, (_, i) => ({
+    id: `${1700000000000 + i * 977}`,
+    timestamp: i,
+  }));
+  const map: Map<string, number> = sessionBackgroundMap(sessions);
+  const ordered = [...sessions].sort((a, b) => b.timestamp - a.timestamp).map(s => map.get(s.id));
+  ordered.forEach((index, i) => expect(ordered.slice(Math.max(0, i - 4), i)).not.toContain(index));
+  expect(new Set(ordered).size).toBeGreaterThan(8);
+});
+
+test('catalog categories cover every bundled exercise exactly once', () => {
+  const {groupByCategory} = require('../src/data/categories');
+  const {exercises} = require('../src/data/exercises');
+  const groups = groupByCategory(exercises);
+  const ids = groups.flatMap((g: {items: {id: number}[]}) => g.items.map(e => e.id));
+  expect(ids.sort((a: number, b: number) => a - b)).toEqual(
+    exercises.map((e: {id: number}) => e.id),
+  );
+  expect(groups.map((g: {title: string}) => g.title)).toContain('Standing');
 });

@@ -15,7 +15,8 @@
     "generate:icon": "python scripts/make-launcher-icon.py",
     "build:android:release": "cd android && gradlew.bat assembleRelease",
     "install:android:release": "adb install -r android/app/build/outputs/apk/release/app-release.apk",
-    "generate:sounds": "python scripts/make-cue-sounds.py"
+    "generate:sounds": "python scripts/make-cue-sounds.py",
+    "generate:backgrounds": "python scripts/make-backgrounds.py"
   },
   "dependencies": {
     "@react-native/new-app-screen": "0.86.2",

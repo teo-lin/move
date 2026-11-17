@@ -3,7 +3,7 @@
     countdown       -> soft tom taps, slowly speeding up over 5 s  res/raw/cue_countdown.wav
     repetition      -> one soft castanet click                      res/raw/cue_rep.wav
     exercise done   -> one pure rising cuica "whoop"               res/raw/cue_finish.wav
-    rest finished   -> one pure falling cuica "hoo"                res/raw/cue_rest.wav
+    rest finished   -> flamenco castanet "carretilla" roll + accent res/raw/cue_rest.wav
 
 Usage (from the repo root):
     python scripts/make-cue-sounds.py [--preview path/to/preview.wav]
@@ -96,6 +96,15 @@ def castanet_click():
     return body + 0.8 * snap
 
 
+def carretilla():
+    """Flamenco castanet trill: four quick soft clicks rolling into one accented click."""
+    out = np.zeros(int(RATE * 0.36))
+    for i, gain in enumerate((0.45, 0.5, 0.55, 0.6)):
+        place(out, castanet_click(), i * 0.055, gain)
+    place(out, castanet_click(), 0.27, 1.0)
+    return out
+
+
 def castanets(hits, spacing):
     out = np.zeros(int(RATE * (spacing * len(hits) + 0.06)))
     for i, gain in enumerate(hits):
@@ -119,7 +128,7 @@ def build():
     countdown = normalize(fade_edges(drum_roll()), 0.32)
     rep = normalize(fade_edges(castanets([1.0], 0.0)), 0.42)
     finish = normalize(fade_edges(cuica(330, 660, 0.24, 0.16)), 0.42)
-    rest = normalize(fade_edges(cuica(520, 300, 0.26, 0.2)), 0.34)
+    rest = normalize(fade_edges(carretilla()), 0.45)
     return {"cue_countdown": countdown, "cue_rep": rep, "cue_finish": finish, "cue_rest": rest}
 
 

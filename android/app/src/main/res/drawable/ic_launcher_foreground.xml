@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive-icon foreground: the self_improvement symbol inset into the 66dp safe zone
+     of the 108dp canvas. Also used as the themed (monochrome) icon. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/self_improvement_24"
+    android:inset="24%" />

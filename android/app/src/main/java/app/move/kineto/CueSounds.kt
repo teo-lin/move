@@ -10,7 +10,7 @@ import android.media.SoundPool
  * - roll:   snare roll that speeds up over the 5-second countdown
  * - rep:    castanet double click marking each repetition
  * - finish: one dry rising cuica "whoop" at the end of an exercise
- * - rest:   one soft falling cuica "hoo" when a rest or breather ends
+ * - rest:   flamenco castanet roll ("carretilla") when a rest or breather ends
  */
 class CueSounds(context: Context) {
   private val pool = SoundPool.Builder()

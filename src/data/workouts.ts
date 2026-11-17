@@ -3,6 +3,8 @@ export type Workout = {
   name: string;
   /** Prefix used in the UI and in back-exercises.csv (e.g. "🦦 PeSpate: abs"). */
   emoji?: string;
+  /** Created in the app (not bundled); stored in full and can be renamed or deleted. */
+  custom?: boolean;
   /** Catch-your-breath break between exercises, in seconds (0 = none). */
   restSeconds?: number;
   steps: WorkoutStep[];
@@ -82,6 +84,7 @@ export const workouts: Workout[] = [
   {
     id: 'core-first-a',
     name: 'Core-First A',
+    emoji: '🐢',
     steps: [
       step(47, 8, 4), // Cat 1
       step(1, 8, 4), // Lumbar Flattening
@@ -100,6 +103,7 @@ export const workouts: Workout[] = [
   {
     id: 'core-first-b',
     name: 'Core-First B',
+    emoji: '🦩',
     steps: [
       step(48, 8, 4), // Cat 2
       perSide(7, 8, 3), // Diagonal crunches
@@ -120,6 +124,7 @@ export const workouts: Workout[] = [
   {
     id: 'office-micro',
     name: 'Office: micro',
+    emoji: '🐿️',
     steps: [
       step(116, 10, 2), // Arm rotations
       step(117, 10, 3), // Arm raises
@@ -145,11 +150,27 @@ export function mergeSavedWorkouts(raw: string | null, defaults: Workout[] = wor
     return defaults;
   }
   try {
-    const saved = JSON.parse(raw) as {id: string; steps: WorkoutStep[]; restSeconds?: number}[];
+    const saved = JSON.parse(raw) as {id: string; name?: string; steps: WorkoutStep[]; restSeconds?: number}[];
     if (!Array.isArray(saved)) {
       return defaults;
     }
-    return defaults.map(workout => {
+    const custom: Workout[] = saved
+      .filter(
+        item =>
+          item &&
+          typeof item.name === 'string' &&
+          !defaults.some(workout => workout.id === item.id) &&
+          Array.isArray(item.steps) &&
+          item.steps.every(isWorkoutStep),
+      )
+      .map(item => ({
+        id: item.id,
+        name: item.name as string,
+        custom: true,
+        steps: item.steps,
+        restSeconds: typeof item.restSeconds === 'number' ? item.restSeconds : 0,
+      }));
+    const bundled = defaults.map(workout => {
       const match = saved.find(item => item && item.id === workout.id);
       if (!match) {
         return workout;
@@ -162,6 +183,7 @@ export function mergeSavedWorkouts(raw: string | null, defaults: Workout[] = wor
           : workout.restSeconds;
       return {...workout, steps, restSeconds};
     });
+    return [...bundled, ...custom];
   } catch {
     return defaults;
   }
@@ -179,7 +201,12 @@ export function serializeWorkoutSettings(list: Workout[], defaults: Workout[] = 
           (base.restSeconds ?? 0) !== (workout.restSeconds ?? 0)
         );
       })
-      .map(workout => ({id: workout.id, steps: workout.steps, restSeconds: workout.restSeconds ?? 0})),
+      .map(workout => ({
+        id: workout.id,
+        ...(workout.custom ? {name: workout.name} : {}),
+        steps: workout.steps,
+        restSeconds: workout.restSeconds ?? 0,
+      })),
   );
 }
 

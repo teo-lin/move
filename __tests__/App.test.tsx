@@ -77,7 +77,7 @@ test('auto-advances once after a two-sided exercise finishes', async () => {
     await Promise.resolve();
   });
 
-  const startButton = renderer!.root.findByProps({accessibilityLabel: 'Start guided workout'});
+  const startButton = renderer!.root.findByProps({accessibilityLabel: 'Start Test Workout'});
 
   await ReactTestRenderer.act(async () => {
     startButton.props.onPress();
@@ -106,12 +106,12 @@ test('inserting a breather saves it in the workout and offers to skip it', async
     await Promise.resolve();
   });
   await ReactTestRenderer.act(async () => {
-    renderer!.root.findByProps({accessibilityLabel: 'Start guided workout'}).props.onPress();
+    renderer!.root.findByProps({accessibilityLabel: 'Start Test Workout'}).props.onPress();
     await Promise.resolve();
   });
 
   await ReactTestRenderer.act(async () => {
-    renderer!.root.findByProps({accessibilityLabel: 'Insert breather'}).props.onPress();
+    renderer!.root.findByProps({accessibilityLabel: 'Breathe'}).props.onPress();
     await Promise.resolve();
   });
 
@@ -122,4 +122,18 @@ test('inserting a breather saves it in the workout and offers to skip it', async
   const steps = JSON.parse(saved![1])[0].steps;
   expect(steps.map((s: {breather?: boolean}) => !!s.breather)).toEqual([false, true, false]);
   expect(steps[1].secondsPerRep).toBe(4);
+
+  // Skip -> the button goes back to Breathe; Breathe re-enables the skipped breather (no duplicate).
+  await ReactTestRenderer.act(async () => {
+    renderer!.root.findByProps({accessibilityLabel: 'Skip breather'}).props.onPress();
+    await Promise.resolve();
+  });
+  expect(renderer!.root.findAllByProps({accessibilityLabel: 'Breathe'}).length).toBeGreaterThan(0);
+  await ReactTestRenderer.act(async () => {
+    renderer!.root.findByProps({accessibilityLabel: 'Breathe'}).props.onPress();
+    await Promise.resolve();
+  });
+  expect(renderer!.root.findAllByProps({accessibilityLabel: 'Skip breather'}).length).toBeGreaterThan(0);
+  const last = moveStorageMock.setString.mock.calls.filter(([key]) => key === 'workouts-v2').pop();
+  expect(JSON.parse(last![1])[0].steps).toHaveLength(3);
 });

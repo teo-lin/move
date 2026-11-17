@@ -1,21 +1,30 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   Alert,
   Animated,
   BackHandler,
   Easing,
   Image,
+  ImageBackground,
   Pressable,
   ScrollView,
   Share,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 
-import {Exercise, exercises, exercisesById} from './src/data/exercises';
+import {Exercise, exercises} from './src/data/exercises';
+import {
+  CustomExercise,
+  customExercisesKey,
+  nextCustomExerciseId,
+  parseCustomExercises,
+  toExercise,
+} from './src/data/customExercises';
 import {
   breatherStep,
   csvWorkoutLabel,
@@ -36,20 +45,28 @@ import {
   historyKey,
   historyStats,
   localDateKey,
-  monthGrid,
   parseHistory,
   serializeHistory,
   SessionEntry,
-  startOfWeek,
   toBackExercisesCsv,
-  weekdayLabels,
 } from './src/data/history';
 import {MoveStorage, SpeechSettings} from './src/native/MoveStorage';
 import {Icon, IconName} from './src/ui/Icon';
+import {Calendar} from './src/ui/Calendar';
+import {Dropdown} from './src/ui/Dropdown';
+import {CatalogGrid} from './src/ui/CatalogGrid';
+import {GlowTile} from './src/ui/GlowTile';
+import {
+  sessionBackgroundMap,
+  assignCardBackgrounds,
+  cardBackground,
+  cardBackgroundsKey,
+  parseCardBackgrounds,
+  tileBackgrounds,
+} from './src/ui/backgrounds';
 
-type Screen = 'workouts' | 'catalog' | 'history' | 'stats';
+type Screen = 'workouts' | 'catalog' | 'history' | 'stats' | 'settings';
 type Phase = 'announce' | 'countdown' | 'work' | 'change-side' | 'finishing' | 'rest';
-
 
 export default function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>('workouts');
@@ -71,6 +88,21 @@ export default function App(): React.JSX.Element {
   const [, setClock] = useState(0);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [detailExerciseId, setDetailExerciseId] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [pickerFilter, setPickerFilter] = useState('');
+  const [creatingExercise, setCreatingExercise] = useState(false);
+  const [newExerciseName, setNewExerciseName] = useState('');
+  const [customExercises, setCustomExercises] = useState<CustomExercise[]>([]);
+  const [cardBackgrounds, setCardBackgrounds] = useState<Record<string, number> | null>(null);
+  const allExercises = useMemo(
+    () => [...exercises, ...customExercises.map(toExercise)],
+    [customExercises],
+  );
+  const exerciseMap = useMemo(
+    () => new Map(allExercises.map(item => [item.id, item])),
+    [allExercises],
+  );
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return {year: now.getFullYear(), month: now.getMonth()};
@@ -78,11 +110,52 @@ export default function App(): React.JSX.Element {
 
   const selectedWorkout = workouts.find(workout => workout.id === selectedWorkoutId) ?? workouts[0];
   const activeStep = activeWorkout?.steps[activeIndex] ?? null;
-  const activeExercise = activeStep ? exercisesById.get(activeStep.exerciseId) ?? null : null;
-  const detailExercise = detailExerciseId === null ? null : exercisesById.get(detailExerciseId) ?? null;
+  const activeExercise = activeStep ? exerciseMap.get(activeStep.exerciseId) ?? null : null;
+  useEffect(() => {
+    if (!cardBackgrounds || !settingsLoaded) {
+      return;
+    }
+    const next = assignCardBackgrounds(
+      cardBackgrounds,
+      workouts.map(workout => workout.id),
+    );
+    if (next !== cardBackgrounds) {
+      setCardBackgrounds(next);
+      fire(MoveStorage.setString(cardBackgroundsKey, JSON.stringify(next)));
+    }
+  }, [cardBackgrounds, workouts, settingsLoaded]);
+
+  /** Background index for a workout (by id). */
+  const backgroundFor = (workoutId: string | undefined) =>
+    workoutId === undefined ? undefined : cardBackgrounds?.[workoutId];
+
+  /** History: every session its own background (stable per session, never the same twice in a row). */
+  const sessionBackgrounds = useMemo(() => sessionBackgroundMap(history), [history]);
+
+  const dayColors = useMemo(() => {
+    const map = new Map<string, string[]>();
+    [...history]
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .forEach(entry => {
+        const key = localDateKey(entry.timestamp);
+        map.set(key, [
+          ...(map.get(key) ?? []),
+          workoutTint(workoutIndexFor(entry.workout, workouts), 74, 62),
+        ]);
+      });
+    return map;
+  }, [history, workouts]);
+  const detailExercise =
+    detailExerciseId === null ? null : exerciseMap.get(detailExerciseId) ?? null;
 
   useEffect(() => {
     MoveStorage.getString(historyKey).then(raw => setHistory(parseHistory(raw)));
+    MoveStorage.getString(customExercisesKey).then(raw =>
+      setCustomExercises(parseCustomExercises(raw)),
+    );
+    MoveStorage.getString(cardBackgroundsKey).then(raw =>
+      setCardBackgrounds(parseCardBackgrounds(raw)),
+    );
     MoveStorage.getString(workoutsKey)
       .then(raw => setWorkouts(mergeSavedWorkouts(raw, starterWorkouts)))
       .finally(() => setSettingsLoaded(true));
@@ -104,15 +177,42 @@ export default function App(): React.JSX.Element {
   }, [activeWorkout]);
 
   useEffect(() => {
-    if (detailExerciseId === null) {
+    if (
+      detailExerciseId === null &&
+      !editing &&
+      !creatingExercise &&
+      screen !== 'settings' &&
+      screen !== 'catalog'
+    ) {
       return;
     }
+    // Back: exercise detail -> catalog -> settings -> workouts; editor -> workout list.
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      setDetailExerciseId(null);
+      if (detailExerciseId !== null) {
+        setDetailExerciseId(null);
+      } else if (picking) {
+        setPicking(false);
+      } else if (creatingExercise) {
+        setCreatingExercise(false);
+      } else if (editing) {
+        setEditing(false);
+      } else if (screen === 'catalog') {
+        setScreen('settings');
+      } else {
+        setScreen('workouts');
+      }
       return true;
     });
     return () => subscription.remove();
-  }, [detailExerciseId]);
+  }, [detailExerciseId, editing, picking, creatingExercise, screen]);
+
+  function navigate(next: Screen) {
+    setEditing(false);
+    setPicking(false);
+    setCreatingExercise(false);
+    setDetailExerciseId(null);
+    setScreen(next);
+  }
 
   useEffect(() => {
     if (!activeWorkout || !activeStep || paused) {
@@ -137,7 +237,7 @@ export default function App(): React.JSX.Element {
       setRestRemaining(activeStep.secondsPerRep);
       setPhase('rest');
     } else if (phase === 'announce') {
-      const name = exercisesById.get(activeStep.exerciseId)?.name ?? 'Exercise';
+      const name = exerciseMap.get(activeStep.exerciseId)?.name ?? 'Exercise';
       speakThen(
         activeStep.twoSides ? `${name}, left` : name,
         () => {
@@ -227,7 +327,17 @@ export default function App(): React.JSX.Element {
     };
     // The timer intentionally captures the current playback state for one tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWorkout?.id, activeStep, activeIndex, countdown, phase, rep, sideChanged, paused, restRemaining]);
+  }, [
+    activeWorkout?.id,
+    activeStep,
+    activeIndex,
+    countdown,
+    phase,
+    rep,
+    sideChanged,
+    paused,
+    restRemaining,
+  ]);
 
   const elapsed = startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0;
 
@@ -237,6 +347,10 @@ export default function App(): React.JSX.Element {
   }
 
   function startWorkout(workout: Workout) {
+    if (exerciseCount(workout) === 0) {
+      Alert.alert('No exercises yet', 'Edit the workout and add some exercises first.');
+      return;
+    }
     setActiveWorkout(workout);
     setActiveIndex(0);
     setPhase('announce');
@@ -280,6 +394,15 @@ export default function App(): React.JSX.Element {
       return next;
     });
     setWorkouts(list => list.map(item => (item.id === activeWorkout.id ? {...item, steps} : item)));
+  }
+
+  /** Breathe: re-enable a breather skipped for this run, or insert a new one. */
+  function breathe() {
+    if (activeWorkout?.steps[activeIndex + 1]?.breather && skipBreatherAt === activeIndex + 1) {
+      setSkipBreatherAt(null);
+    } else {
+      insertBreather();
+    }
   }
 
   function skipBreather() {
@@ -355,7 +478,8 @@ export default function App(): React.JSX.Element {
       return;
     }
     const rest = activeWorkout.restSeconds ?? 0;
-    const betweenExercises = !activeWorkout.steps[activeIndex].breather && !activeWorkout.steps[next].breather;
+    const betweenExercises =
+      !activeWorkout.steps[activeIndex].breather && !activeWorkout.steps[next].breather;
     goToStep(next);
     if (rest > 0 && betweenExercises) {
       startRest(rest);
@@ -378,7 +502,8 @@ export default function App(): React.JSX.Element {
 
     const completed = autoCompleted
       ? exerciseCount(activeWorkout)
-      : completedSteps.filter((done, index) => done && !activeWorkout.steps[index]?.breather).length;
+      : completedSteps.filter((done, index) => done && !activeWorkout.steps[index]?.breather)
+          .length;
     const entry: SessionEntry = {
       id: `${Date.now()}`,
       timestamp: Date.now(),
@@ -410,6 +535,58 @@ export default function App(): React.JSX.Element {
     }));
   }
 
+  function addWorkout() {
+    const workout: Workout = {
+      id: `custom-${Date.now()}`,
+      name: 'New workout',
+      custom: true,
+      steps: [],
+    };
+    setWorkouts(list => [...list, workout]);
+    setSelectedWorkoutId(workout.id);
+    setEditing(true);
+  }
+
+  function deleteSelectedWorkout() {
+    Alert.alert('Delete workout?', workoutLabel(selectedWorkout), [
+      {text: 'Cancel', style: 'cancel'},
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          setWorkouts(list => list.filter(item => item.id !== selectedWorkout.id));
+          setSelectedWorkoutId(starterWorkouts[0].id);
+          setEditing(false);
+        },
+      },
+    ]);
+  }
+
+  function addExerciseToWorkout(exerciseId: number) {
+    updateSelectedWorkout(workout => ({
+      ...workout,
+      steps: [...workout.steps, {exerciseId, repetitions: 10, secondsPerRep: 3, twoSides: false}],
+    }));
+    setPicking(false);
+    setPickerFilter('');
+  }
+
+  async function saveNewExercise() {
+    const name = newExerciseName.trim();
+    if (!name) {
+      return;
+    }
+    const next = [...customExercises, {id: nextCustomExerciseId(customExercises), name}];
+    setCustomExercises(next);
+    await MoveStorage.setString(customExercisesKey, JSON.stringify(next));
+    setNewExerciseName('');
+    setCreatingExercise(false);
+    Alert.alert(
+      'Exercise added',
+      `"${name}" is in the catalog. Add it to a workout with Edit → Add Exercise.`,
+    );
+  }
+
   function removeStep(index: number) {
     updateSelectedWorkout(workout => ({
       ...workout,
@@ -433,7 +610,9 @@ export default function App(): React.JSX.Element {
   function confirmDeleteEntry(entry: SessionEntry) {
     Alert.alert(
       'Delete session?',
-      `${formatDisplayDate(entry.timestamp)} ${formatTime(entry.timestamp)} · ${entry.workout} · ${entry.completed} / ${entry.total}`,
+      `${formatDisplayDate(entry.timestamp)} ${formatTime(entry.timestamp)} · ${entry.workout} · ${
+        entry.completed
+      } / ${entry.total}`,
       [
         {text: 'Cancel', style: 'cancel'},
         {
@@ -489,7 +668,8 @@ export default function App(): React.JSX.Element {
         <View style={styles.runner}>
           <Text style={styles.meta}>
             {activeWorkout.steps.slice(0, activeIndex + 1).filter(item => !item.breather).length} /{' '}
-            {exerciseCount(activeWorkout)} · {activeStep.breather ? 'breather' : phaseLabel(phase, countdown)} ·{' '}
+            {exerciseCount(activeWorkout)} ·{' '}
+            {activeStep.breather ? 'breather' : phaseLabel(phase, countdown)} ·{' '}
             {formatDuration(elapsed)}
           </Text>
           {phase === 'rest' ? (
@@ -499,13 +679,9 @@ export default function App(): React.JSX.Element {
               <SegmentBar total={1} done={0} fill={restTotal > 0 ? restRemaining / restTotal : 0} />
               {(() => {
                 const upcoming = activeStep.breather
-                  ? exercisesById.get(activeWorkout.steps[stepAfter(activeIndex)]?.exerciseId ?? -1)
+                  ? exerciseMap.get(activeWorkout.steps[stepAfter(activeIndex)]?.exerciseId ?? -1)
                   : activeExercise;
-                return upcoming ? (
-                  <Text style={styles.meta}>
-                    Up next: {upcoming.name}
-                  </Text>
-                ) : null;
+                return upcoming ? <Text style={styles.meta}>Up next: {upcoming.name}</Text> : null;
               })()}
             </View>
           ) : activeExercise ? (
@@ -517,8 +693,12 @@ export default function App(): React.JSX.Element {
             <>
               {activeStep.twoSides && (
                 <View style={styles.sideRow}>
-                  <Text style={[styles.sideBadge, !sideChanged && styles.sideBadgeActive]}>Left</Text>
-                  <Text style={[styles.sideBadge, sideChanged && styles.sideBadgeActive]}>Right</Text>
+                  <Text style={[styles.sideBadge, !sideChanged && styles.sideBadgeActive]}>
+                    Left
+                  </Text>
+                  <Text style={[styles.sideBadge, sideChanged && styles.sideBadgeActive]}>
+                    Right
+                  </Text>
                 </View>
               )}
               <RepProgress
@@ -543,19 +723,27 @@ export default function App(): React.JSX.Element {
               disabled={activeWorkout.steps.slice(0, activeIndex).every(item => item.breather)}
               onPress={previousExercise}
             />
-            <IconButton label="Repeat" caption="Repeat" icon="replay" onPress={restartCurrentExercise} />
+            <IconButton
+              label="Repeat"
+              caption="Repeat"
+              icon="replay"
+              onPress={restartCurrentExercise}
+            />
             {(() => {
               const nextIsBreather = activeWorkout.steps[activeIndex + 1]?.breather === true;
               if (activeStep.breather || (nextIsBreather && skipBreatherAt !== activeIndex + 1)) {
-                return <IconButton label="Skip breather" caption="Skip" icon="skip" onPress={skipBreather} />;
-              }
-              if (nextIsBreather) {
                 return (
-                  <IconButton label="Breather skipped" caption="Skipped" icon="skip" disabled onPress={skipBreather} />
+                  <IconButton
+                    label="Skip breather"
+                    caption="Skip"
+                    icon="skip"
+                    onPress={skipBreather}
+                  />
                 );
               }
+              // After Skip the button is back to Breathe; on a skipped breather it re-enables it.
               return (
-                <IconButton label="Insert breather" caption="Breather" icon="breather" onPress={insertBreather} />
+                <IconButton label="Breathe" caption="Breathe" icon="breathe" onPress={breathe} />
               );
             })()}
             <IconButton
@@ -571,7 +759,12 @@ export default function App(): React.JSX.Element {
               }}
             />
             <IconButton label="Next" caption="Next" icon="next" onPress={nextExercise} />
-            <IconButton label="Finish workout" caption="Finish" icon="stop" onPress={() => finishWorkout(false)} />
+            <IconButton
+              label="Finish workout"
+              caption="Finish"
+              icon="stop"
+              onPress={() => finishWorkout(false)}
+            />
           </View>
         </View>
       </Shell>
@@ -579,31 +772,137 @@ export default function App(): React.JSX.Element {
   }
 
   return (
-    <Shell title="Move" screen={screen} setScreen={setScreen}>
-      {screen === 'workouts' && selectedWorkout && (
-        <ScrollView contentContainerStyle={styles.content}>
-          <View style={styles.segment}>
-            {workouts.map(workout => (
-              <Pressable
-                key={workout.id}
-                style={[styles.segmentOption, workout.id === selectedWorkout.id && styles.segmentOptionActive]}
-                onPress={() => setSelectedWorkoutId(workout.id)}>
-                <Text
-                  style={[
-                    styles.segmentText,
-                    workout.id === selectedWorkout.id && styles.segmentTextActive,
-                  ]}>
-                  {workoutLabel(workout)}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
+    <Shell title="Move" screen={screen} setScreen={navigate}>
+      {screen === 'workouts' && !editing && creatingExercise && (
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <SmallButton label="‹ Workouts" onPress={() => setCreatingExercise(false)} />
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>{workoutLabel(selectedWorkout)}</Text>
+            <Text style={styles.cardTitle}>New exercise</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Exercise name"
+              value={newExerciseName}
+              onChangeText={setNewExerciseName}
+              autoFocus
+              onSubmitEditing={saveNewExercise}
+            />
+            <Text style={styles.meta}>
+              It gets a placeholder picture; reps and timing are set per workout.
+            </Text>
+            <Action label="Save exercise" onPress={saveNewExercise} />
+          </View>
+        </ScrollView>
+      )}
+
+      {screen === 'workouts' && !editing && !creatingExercise && (
+        <ScrollView contentContainerStyle={styles.content}>
+          <View style={styles.addRow}>
+            <PastelButton
+              label="Add Workout"
+              icon="symbolAddBold"
+              color={pastels.mint}
+              onPress={addWorkout}
+            />
+            <PastelButton
+              label="Add Exercise"
+              icon="symbolAddBold"
+              color={pastels.sky}
+              onPress={() => setCreatingExercise(true)}
+            />
+          </View>
+          {workouts.map(workout => {
+            const label = workoutLabel(workout);
+            const done = history.filter(
+              entry => csvWorkoutLabel(entry.workout, workouts) === label,
+            );
+            const last = done.reduce((latest, entry) => Math.max(latest, entry.timestamp), 0);
+            return (
+              <Textured
+                style={styles.workoutCard}
+                background={backgroundFor(workout.id)}
+                key={workout.id}>
+                <View style={styles.workoutInfo}>
+                  <Text
+                    style={styles.cardTitle}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}>
+                    {label}
+                  </Text>
+                  <Text style={styles.stepMeta} numberOfLines={1}>
+                    {exerciseCount(workout)} exercises · ~
+                    {Math.round(estimateSeconds(workout) / 60)} min ·{' '}
+                    {done.length === 0
+                      ? 'not done yet'
+                      : `${done.length}× · last ${formatDisplayDate(last).slice(0, 5)}`}
+                  </Text>
+                </View>
+                <View style={styles.workoutButtons}>
+                  <Pressable
+                    style={styles.workoutButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Start ${label}`}
+                    onPress={() => {
+                      setSelectedWorkoutId(workout.id);
+                      startWorkout(workout);
+                    }}>
+                    <Icon name="symbolPlay" size={20} color="#1f2d38" />
+                  </Pressable>
+                  <Pressable
+                    style={styles.workoutButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit ${label}`}
+                    onPress={() => {
+                      setSelectedWorkoutId(workout.id);
+                      setEditing(true);
+                    }}>
+                    <Icon name="symbolEdit" size={15} color="#1f2d38" />
+                  </Pressable>
+                </View>
+              </Textured>
+            );
+          })}
+        </ScrollView>
+      )}
+
+      {screen === 'workouts' && editing && picking && (
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <SmallButton label="‹ Back to workout" onPress={() => setPicking(false)} />
+          <TextInput
+            style={styles.input}
+            placeholder="Search exercises"
+            value={pickerFilter}
+            onChangeText={setPickerFilter}
+          />
+          {allExercises
+            .filter(item => item.name.toLowerCase().includes(pickerFilter.trim().toLowerCase()))
+            .map(item => (
+              <ExerciseRow
+                exercise={item}
+                key={item.id}
+                onPress={() => addExerciseToWorkout(item.id)}
+              />
+            ))}
+        </ScrollView>
+      )}
+
+      {screen === 'workouts' && editing && !picking && selectedWorkout && (
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <SmallButton label="‹ Workouts" onPress={() => setEditing(false)} />
+          <View style={styles.card}>
+            {selectedWorkout.custom ? (
+              <TextInput
+                style={[styles.input, styles.cardTitle]}
+                value={selectedWorkout.name}
+                placeholder="Workout name"
+                onChangeText={name => updateSelectedWorkout(workout => ({...workout, name}))}
+              />
+            ) : (
+              <Text style={styles.cardTitle}>{workoutLabel(selectedWorkout)}</Text>
+            )}
             <Text style={styles.meta}>
               {exerciseCount(selectedWorkout)} exercises · about{' '}
-              {Math.round(estimateSeconds(selectedWorkout) / 60)} min with cues
+              {Math.round(estimateSeconds(selectedWorkout) / 60)} min
             </Text>
             <View style={styles.restSetting}>
               <Text style={styles.bodyText}>
@@ -630,8 +929,11 @@ export default function App(): React.JSX.Element {
                 />
               </View>
             </View>
-            <Action label="Start guided workout" onPress={() => startWorkout(selectedWorkout)} />
-            <SmallButton label="Reset to default settings" onPress={resetSelectedWorkout} />
+            {selectedWorkout.custom ? (
+              <SmallButton label="Delete workout" onPress={deleteSelectedWorkout} />
+            ) : (
+              <SmallButton label="Reset to default settings" onPress={resetSelectedWorkout} />
+            )}
           </View>
 
           {selectedWorkout.steps.map((step, index) => {
@@ -639,55 +941,116 @@ export default function App(): React.JSX.Element {
               return (
                 <View style={styles.breatherCard} key={`breather-${index}`}>
                   <Text style={styles.bodyText}>≈ Breather · {step.secondsPerRep}s</Text>
-                  <View style={styles.smallControlRow}>
-                    <SmallButton label="↑" onPress={() => moveStep(index, -1)} />
-                    <SmallButton label="↓" onPress={() => moveStep(index, 1)} />
-                    <SmallButton
-                      label="- sec"
-                      onPress={() => updateStep(index, {secondsPerRep: Math.max(1, step.secondsPerRep - 1)})}
-                    />
-                    <SmallButton label="+ sec" onPress={() => updateStep(index, {secondsPerRep: step.secondsPerRep + 1})} />
-                    <SmallButton label="remove" onPress={() => removeStep(index)} />
+                  <View style={styles.editGrid}>
+                    <View style={styles.editRow}>
+                      <ArrowButton direction="up" onPress={() => moveStep(index, -1)} />
+                      <GridButton
+                        label="+ sec"
+                        onPress={() =>
+                          updateStep(index, {
+                            secondsPerRep: step.secondsPerRep + 1,
+                          })
+                        }
+                      />
+                      <GridButton label="Remove" onPress={() => removeStep(index)} />
+                    </View>
+                    <View style={styles.editRow}>
+                      <ArrowButton direction="down" onPress={() => moveStep(index, 1)} />
+                      <GridButton
+                        label="- sec"
+                        onPress={() =>
+                          updateStep(index, {
+                            secondsPerRep: Math.max(1, step.secondsPerRep - 1),
+                          })
+                        }
+                      />
+                      <View style={styles.gridSpacer} />
+                    </View>
                   </View>
                 </View>
               );
             }
-            const exercise = exercisesById.get(step.exerciseId);
-            const number = selectedWorkout.steps.slice(0, index + 1).filter(item => !item.breather).length;
+            const exercise = exerciseMap.get(step.exerciseId);
+            const number = selectedWorkout.steps
+              .slice(0, index + 1)
+              .filter(item => !item.breather).length;
             return (
               <View style={styles.stepCard} key={`${step.exerciseId}-${index}`}>
-                {exercise && <Image source={exercise.asset} style={styles.stepThumb} resizeMode="contain" />}
+                {exercise && (
+                  <Image source={exercise.asset} style={styles.stepThumb} resizeMode="contain" />
+                )}
                 <View style={styles.stepMain}>
-                  <Text style={styles.exerciseName}>
-                    {number}. {exercise ? exercise.name : `Exercise ${step.exerciseId}`}
-                  </Text>
-                  <Text style={styles.meta}>
+                  <View style={styles.stepTitleRow}>
+                    <Text style={styles.stepName} numberOfLines={1}>
+                      {number}. {exercise ? exercise.name : 'Removed exercise'}
+                    </Text>
+                    <Pressable
+                      style={styles.removeButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${exercise?.name ?? 'exercise'}`}
+                      onPress={() => removeStep(index)}>
+                      <Icon name="symbolClose" size={18} color="#697782" />
+                    </Pressable>
+                  </View>
+                  <Text style={styles.stepMeta}>
                     {step.twoSides
-                      ? `${step.repetitions / 2} per side (left, then right)`
+                      ? `${step.repetitions / 2} per side`
                       : `${step.repetitions} reps`}{' '}
                     · {step.secondsPerRep}s each
                   </Text>
-                  <View style={styles.smallControlRow}>
-                    <SmallButton label="↑" onPress={() => moveStep(index, -1)} />
-                    <SmallButton label="↓" onPress={() => moveStep(index, 1)} />
-                    <SmallButton
-                      label="- rep"
-                      onPress={() => {
-                        const unit = step.twoSides ? 2 : 1;
-                        updateStep(index, {repetitions: Math.max(unit, step.repetitions - unit)});
-                      }}
-                    />
-                    <SmallButton
-                      label="+ rep"
-                      onPress={() => updateStep(index, {repetitions: step.repetitions + (step.twoSides ? 2 : 1)})}
-                    />
-                    <SmallButton label="- sec" onPress={() => updateStep(index, {secondsPerRep: Math.max(1, step.secondsPerRep - 1)})} />
-                    <SmallButton label="+ sec" onPress={() => updateStep(index, {secondsPerRep: step.secondsPerRep + 1})} />
+                  <View style={styles.editGrid}>
+                    <View style={styles.editRow}>
+                      <ArrowButton direction="up" onPress={() => moveStep(index, -1)} />
+                      <GridButton
+                        label="+ rep"
+                        onPress={() =>
+                          updateStep(index, {
+                            repetitions: step.repetitions + (step.twoSides ? 2 : 1),
+                          })
+                        }
+                      />
+                      <GridButton
+                        label="+ sec"
+                        onPress={() =>
+                          updateStep(index, {
+                            secondsPerRep: step.secondsPerRep + 1,
+                          })
+                        }
+                      />
+                    </View>
+                    <View style={styles.editRow}>
+                      <ArrowButton direction="down" onPress={() => moveStep(index, 1)} />
+                      <GridButton
+                        label="- rep"
+                        onPress={() => {
+                          const unit = step.twoSides ? 2 : 1;
+                          updateStep(index, {
+                            repetitions: Math.max(unit, step.repetitions - unit),
+                          });
+                        }}
+                      />
+                      <GridButton
+                        label="- sec"
+                        onPress={() =>
+                          updateStep(index, {
+                            secondsPerRep: Math.max(1, step.secondsPerRep - 1),
+                          })
+                        }
+                      />
+                    </View>
                   </View>
                 </View>
               </View>
             );
           })}
+          <Pressable
+            style={styles.addButton}
+            accessibilityRole="button"
+            accessibilityLabel="Add exercise to workout"
+            onPress={() => setPicking(true)}>
+            <Icon name="symbolAdd" size={22} color="#126b46" />
+            <Text style={styles.addButtonText}>Add Exercise</Text>
+          </Pressable>
         </ScrollView>
       )}
 
@@ -707,14 +1070,11 @@ export default function App(): React.JSX.Element {
 
       {screen === 'catalog' && !detailExercise && (
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.meta}>{exercises.length} exercises bundled locally</Text>
-          {exercises.map(exercise => (
-            <ExerciseRow
-              exercise={exercise}
-              key={exercise.id}
-              onPress={() => setDetailExerciseId(exercise.id)}
-            />
-          ))}
+          <SmallButton label="‹ Settings" onPress={() => navigate('settings')} />
+          <CatalogGrid
+            exercises={allExercises}
+            onPress={exercise => setDetailExerciseId(exercise.id)}
+          />
         </ScrollView>
       )}
 
@@ -723,36 +1083,73 @@ export default function App(): React.JSX.Element {
           <Calendar
             year={calendarMonth.year}
             month={calendarMonth.month}
-            activeDays={new Set(history.map(entry => localDateKey(entry.timestamp)))}
+            dayColors={dayColors}
             onShift={shiftCalendar}
           />
-          {history.length > 0 && <Text style={styles.meta}>Long-press a session to delete it.</Text>}
+          {history.length > 0 && (
+            <Text style={styles.meta}>Long-press a session to delete it.</Text>
+          )}
           {history.length === 0 ? (
             <Text style={styles.empty}>No completed sessions yet.</Text>
           ) : (
             groupByLocalDate(history).map(group => (
-              <View style={styles.card} key={group.key}>
-                <Text style={styles.cardTitle}>{group.label}</Text>
-                {group.entries.map(entry => (
-                  <Pressable
-                    key={entry.id}
-                    onLongPress={() => confirmDeleteEntry(entry)}
-                    accessibilityRole="button"
-                    accessibilityHint="Long press to delete this session">
-                    <Text style={styles.bodyText}>
-                      {formatTime(entry.timestamp)} · {entry.workout} · {entry.completed} / {entry.total}{' '}
-                      · {formatDuration(entry.durationSeconds)}
-                    </Text>
-                  </Pressable>
-                ))}
+              <View style={styles.dayGroup} key={group.key}>
+                <Text style={styles.dayLabel}>{group.label}</Text>
+                {group.entries.map(entry => {
+                  return (
+                    <Pressable
+                      key={entry.id}
+                      onLongPress={() => confirmDeleteEntry(entry)}
+                      accessibilityRole="button"
+                      accessibilityHint="Long press to delete this session">
+                      <Textured
+                        style={styles.sessionCard}
+                        background={sessionBackgrounds.get(entry.id)}>
+                        <View style={styles.sessionMain}>
+                          <Text style={styles.sessionTitle} numberOfLines={1}>
+                            {csvWorkoutLabel(entry.workout, workouts)}
+                          </Text>
+                          <Text style={styles.stepMeta}>
+                            {formatTime(entry.timestamp)} · {entry.completed} / {entry.total}{' '}
+                            exercises
+                          </Text>
+                        </View>
+                        <Text style={styles.sessionDuration}>
+                          {formatDuration(entry.durationSeconds)}
+                        </Text>
+                      </Textured>
+                    </Pressable>
+                  );
+                })}
               </View>
             ))
           )}
         </ScrollView>
       )}
 
+      {screen === 'settings' && (
+        <ScrollView contentContainerStyle={styles.content}>
+          <Text style={styles.cardTitle}>Settings</Text>
+          <Pressable
+            style={styles.card}
+            accessibilityRole="button"
+            accessibilityLabel="Exercise catalog"
+            onPress={() => navigate('catalog')}>
+            <Text style={styles.cardTitle}>Exercise catalog ›</Text>
+            <Text style={styles.meta}>{allExercises.length} exercises with their animations</Text>
+          </Pressable>
+          <VoiceSettings />
+        </ScrollView>
+      )}
+
       {screen === 'stats' && (
-        <StatsScreen history={history} onExport={exportCsv} onShare={shareCsv} />
+        <StatsScreen
+          backgrounds={cardBackgrounds}
+          history={history}
+          workouts={workouts}
+          onExport={exportCsv}
+          onShare={shareCsv}
+        />
       )}
     </Shell>
   );
@@ -796,10 +1193,28 @@ function Shell({
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       <View style={styles.header}>
-        <Text style={styles.title}>{title}</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
+          </Text>
+          <Pressable
+            style={styles.settingsButton}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            onPress={() => setScreen('settings')}>
+            <Icon
+              name="settings"
+              size={28}
+              color={screen === 'settings' || screen === 'catalog' ? '#126b46' : '#52606d'}
+            />
+          </Pressable>
+        </View>
         <View style={styles.tabs}>
-          <Tab label="Workouts" active={screen === 'workouts'} onPress={() => setScreen('workouts')} />
-          <Tab label="Catalog" active={screen === 'catalog'} onPress={() => setScreen('catalog')} />
+          <Tab
+            label="Workouts"
+            active={screen === 'workouts'}
+            onPress={() => setScreen('workouts')}
+          />
           <Tab label="History" active={screen === 'history'} onPress={() => setScreen('history')} />
           <Tab label="Stats" active={screen === 'stats'} onPress={() => setScreen('stats')} />
         </View>
@@ -809,20 +1224,48 @@ function Shell({
   );
 }
 
-const monthNames = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
+/** A light pastel per workout: golden-angle hue steps keep neighbouring cards clearly different. */
+function pastel(index: number, lightness = 91, saturation = 70): string {
+  const hue = Math.round((200 + index * 137.5) % 360);
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+}
+
+/** Card on the workout's grainy aurora texture (plain grey when the workout no longer exists). */
+function Textured({
+  background,
+  style,
+  children,
+}: {
+  /** Index into the card backgrounds; undefined shows a plain grey card. */
+  background: number | undefined;
+  style: object;
+  children: React.ReactNode;
+}) {
+  const source = cardBackground(background);
+  return source ? (
+    <ImageBackground
+      source={source}
+      style={[style, styles.textured]}
+      imageStyle={styles.texturedImage}
+      resizeMethod="scale"
+      resizeMode="cover">
+      {children}
+    </ImageBackground>
+  ) : (
+    <View style={[style, styles.textured, styles.untextured]}>{children}</View>
+  );
+}
+
+/** Workout colour for history/stats; grey when the workout no longer exists. */
+function workoutTint(index: number, lightness = 91, saturation = 70): string {
+  return index >= 0 ? pastel(index, lightness, saturation) : lightness > 80 ? '#eef1f4' : '#9aa4ad';
+}
+
+/** Index of the workout a history label belongs to (-1 if it no longer exists). */
+function workoutIndexFor(label: string, list: Workout[]): number {
+  const csv = csvWorkoutLabel(label, list);
+  return list.findIndex(workout => workoutLabel(workout) === csv);
+}
 
 /** Rough length including the spoken name, countdowns and side changes. */
 function estimateSeconds(workout: Workout): number {
@@ -860,7 +1303,9 @@ function RepProgress({step, rep, running}: {step: WorkoutStep; rep: number; runn
     <View
       style={styles.segmentBar}
       accessibilityRole="progressbar"
-      accessibilityLabel={`Repetition ${Math.min(rep + 1, step.repetitions)} of ${step.repetitions}`}>
+      accessibilityLabel={`Repetition ${Math.min(rep + 1, step.repetitions)} of ${
+        step.repetitions
+      }`}>
       {Array.from({length: step.repetitions}, (_, index) => (
         <View key={index} style={[styles.repSegment, index === half && styles.repSegmentSideGap]}>
           {index < rep && <View style={[styles.repSegmentFill, styles.fullWidth]} />}
@@ -868,7 +1313,12 @@ function RepProgress({step, rep, running}: {step: WorkoutStep; rep: number; runn
             <Animated.View
               style={[
                 styles.repSegmentFill,
-                {width: progress.interpolate({inputRange: [0, 1], outputRange: ['0%', '100%']})},
+                {
+                  width: progress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['0%', '100%'],
+                  }),
+                },
               ]}
             />
           )}
@@ -894,112 +1344,86 @@ function SegmentBar({total, done, fill}: {total: number; done: number; fill: num
   );
 }
 
-function Calendar({
-  year,
-  month,
-  activeDays,
-  onShift,
-}: {
-  year: number;
-  month: number;
-  activeDays: Set<string>;
-  onShift: (delta: number) => void;
-}) {
-  const title = `${monthNames[month]} ${year}`;
-  const today = localDateKey(new Date());
-  const weekStart = startOfWeek(new Date());
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekEnd.getDate() + 6);
-  const daysThisWeek = [...activeDays].filter(key => {
-    const [y, m, d] = key.split('-').map(Number);
-    const date = new Date(y, m - 1, d);
-    return date >= weekStart && date <= weekEnd;
-  }).length;
-
-  return (
-    <View style={styles.card}>
-      <View style={styles.calendarHeader}>
-        <SmallButton label="‹" onPress={() => onShift(-1)} />
-        <Text style={styles.cardTitle}>{title}</Text>
-        <SmallButton label="›" onPress={() => onShift(1)} />
-      </View>
-      <View style={styles.calendarRow}>
-        {weekdayLabels.map(label => (
-          <Text style={styles.calendarWeekday} key={label}>
-            {label}
-          </Text>
-        ))}
-      </View>
-      {monthGrid(year, month).map((week, index) => (
-        <View style={styles.calendarRow} key={index}>
-          {week.map((day, dayIndex) => {
-            const key = day ? localDateKey(day) : '';
-            const active = day !== null && activeDays.has(key);
-            return (
-              <View
-                key={dayIndex}
-                style={[
-                  styles.calendarCell,
-                  active && styles.calendarCellActive,
-                  key === today && styles.calendarCellToday,
-                ]}>
-                <Text style={[styles.calendarDay, active && styles.calendarDayActive]}>
-                  {day ? day.getDate() : ''}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-      ))}
-      <Text style={styles.meta}>
-        This week ({formatDisplayDate(weekStart)} – {formatDisplayDate(weekEnd)}): {daysThisWeek} active{' '}
-        {daysThisWeek === 1 ? 'day' : 'days'}
-      </Text>
-    </View>
-  );
-}
-
 function StatsScreen({
   history,
+  workouts,
+  backgrounds,
   onExport,
   onShare,
 }: {
   history: SessionEntry[];
+  workouts: Workout[];
+  backgrounds: Record<string, number> | null;
   onExport: () => void;
   onShare: () => void;
 }) {
-  const stats = historyStats(history);
+  // Merge rows for the same workout recorded under old and new labels (e.g. with/without emoji).
+  const stats = historyStats(
+    history.map(entry => ({
+      ...entry,
+      workout: csvWorkoutLabel(entry.workout, workouts),
+    })),
+  );
+  const maxCount = Math.max(1, ...stats.byWorkout.map(item => item.count));
   return (
     <ScrollView contentContainerStyle={styles.content}>
+      <View style={styles.addRow}>
+        <PastelButton
+          label="Export"
+          accessibilityLabel="Export CSV"
+          icon="symbolDownload"
+          color={pastels.peach}
+          onPress={onExport}
+        />
+        <PastelButton
+          label="Share"
+          accessibilityLabel="Share CSV"
+          icon="symbolShare"
+          color={pastels.lilac}
+          onPress={onShare}
+        />
+      </View>
       <View style={styles.statGrid}>
-        <StatTile label="This week" value={stats.thisWeek} />
-        <StatTile label="This month" value={stats.thisMonth} />
-        <StatTile label="Sessions" value={stats.total} />
-        <StatTile label="Minutes" value={stats.totalMinutes} />
+        <GlowTile label="This week" value={stats.thisWeek} texture={tileBackgrounds.mint} />
+        <GlowTile label="This month" value={stats.thisMonth} texture={tileBackgrounds.sky} />
+        <GlowTile label="Sessions" value={stats.total} texture={tileBackgrounds.peach} />
+        <GlowTile label="Minutes" value={stats.totalMinutes} texture={tileBackgrounds.lilac} />
       </View>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>By workout</Text>
-        {stats.byWorkout.length === 0 ? (
-          <Text style={styles.meta}>No completed sessions yet.</Text>
-        ) : (
-          stats.byWorkout.map(item => (
-            <Text style={styles.bodyText} key={item.workout}>
-              {item.workout}: {item.count}× · last {formatDisplayDate(item.lastTimestamp)} ·{' '}
-              {Math.round(item.totalSeconds / 60)} min
-            </Text>
-          ))
-        )}
-      </View>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>back-exercises.csv</Text>
-        <Text style={styles.meta}>
-          Same columns as the health repo baseline: "Date","Workout","Completion","Duration". Export
-          writes Download/move/back-exercises.csv for adb pull.
-        </Text>
-        <Action label="Export CSV" onPress={onExport} />
-        <Action label="Share CSV" onPress={onShare} />
-      </View>
-      <VoiceSettings />
+      {stats.byWorkout.length === 0 ? (
+        <Text style={styles.meta}>No completed sessions yet.</Text>
+      ) : (
+        stats.byWorkout.map(item => {
+          const index = workoutIndexFor(item.workout, workouts);
+          return (
+            <Textured
+              key={item.workout}
+              style={styles.byWorkoutRow}
+              background={index >= 0 ? backgrounds?.[workouts[index].id] : undefined}>
+              <View style={styles.byWorkoutHeader}>
+                <Text style={styles.sessionTitle} numberOfLines={1}>
+                  {item.workout}
+                </Text>
+                <Text style={styles.byWorkoutCount}>{item.count}×</Text>
+              </View>
+              <View style={styles.barTrack}>
+                <View
+                  style={[
+                    styles.barFill,
+                    {
+                      width: `${Math.round((item.count / maxCount) * 100)}%`,
+                      backgroundColor: workoutTint(index, 55, 45),
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={styles.stepMeta}>
+                last {formatDisplayDate(item.lastTimestamp)} · {Math.round(item.totalSeconds / 60)}{' '}
+                min in total
+              </Text>
+            </Textured>
+          );
+        })
+      )}
     </ScrollView>
   );
 }
@@ -1041,27 +1465,19 @@ function VoiceSettings() {
   return (
     <View style={styles.card}>
       <Text style={styles.cardTitle}>Voice</Text>
-      <Text style={styles.meta}>Offline voices on this phone. Tap one to hear it.</Text>
-      <View style={styles.chipRow}>
-        {settings.engines.map(engine => (
-          <Chip
-            key={engine.name}
-            label={engine.label}
-            active={engine.name === settings.engine}
-            onPress={() => pickEngine(engine.name)}
-          />
-        ))}
-      </View>
-      <View style={styles.chipRow}>
-        {settings.voices.map(voice => (
-          <Chip
-            key={voice.name}
-            label={`${voice.locale} · ${voice.name.replace(/^[a-z]{2}-[a-z]{2}-x-/, '')}`}
-            active={voice.name === settings.voice}
-            onPress={() => pickVoice(voice.name)}
-          />
-        ))}
-      </View>
+      <Text style={styles.meta}>Offline voices on this phone. Picking one plays a sample.</Text>
+      <Dropdown
+        label="Speech engine"
+        value={settings.engine}
+        options={settings.engines.map(engine => ({value: engine.name, label: engine.label}))}
+        onChange={pickEngine}
+      />
+      <Dropdown
+        label="Voice"
+        value={settings.voice}
+        options={settings.voices.map(voice => ({value: voice.name, label: voiceLabel(voice)}))}
+        onChange={pickVoice}
+      />
       <View style={styles.smallControlRow}>
         <SmallButton label="slower" onPress={() => changeRate(-0.05)} />
         <Text style={styles.bodyText}>speed {settings.rate.toFixed(2)}</Text>
@@ -1072,25 +1488,23 @@ function VoiceSettings() {
   );
 }
 
-function Chip({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
-  return (
-    <Pressable
-      style={[styles.chip, active && styles.chipActive]}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}>
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
+const localeNames: Record<string, string> = {
+  'en-GB': 'English (UK)',
+  'en-US': 'English (US)',
+  'en-AU': 'English (Australia)',
+  'en-IN': 'English (India)',
+  'en-NG': 'English (Nigeria)',
+  'en-CA': 'English (Canada)',
+  'en-IE': 'English (Ireland)',
+};
 
-function StatTile({label, value}: {label: string; value: number}) {
-  return (
-    <View style={styles.statTile}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.meta}>{label}</Text>
-    </View>
-  );
+/** "English (UK) · voice gba" instead of "en-gb-x-gba-local". */
+function voiceLabel(voice: {name: string; locale: string}): string {
+  const short = voice.name
+    .replace(/^[a-z]{2}-[a-z]{2}-x-/i, '')
+    .replace(/-(local|network)$/, '')
+    .replace(/^[a-z]{2}-[A-Z]{2}-language$/i, 'default');
+  return `${localeNames[voice.locale] ?? voice.locale} · voice ${short}`;
 }
 
 function Tab({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
@@ -1130,7 +1544,9 @@ function ExercisePreview({
     <View style={fill ? styles.previewFill : styles.preview}>
       <Image
         source={exercise.asset}
-        style={fill ? styles.previewImageFill : large ? styles.previewImageLarge : styles.previewImage}
+        style={
+          fill ? styles.previewImageFill : large ? styles.previewImageLarge : styles.previewImage
+        }
         resizeMode="contain"
       />
       <Text style={styles.cardTitle}>{exercise.name}</Text>
@@ -1159,7 +1575,13 @@ function IconButton({
       style={[styles.iconButton, disabled && styles.actionDisabled]}
       onPress={onPress}>
       <Icon name={icon} size={30} color={disabled ? '#9aa4ad' : '#226fb8'} />
-      <Text style={[styles.iconCaption, disabled && styles.actionTextDisabled]}>{caption}</Text>
+      <Text
+        style={[styles.iconCaption, disabled && styles.actionTextDisabled]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}>
+        {caption}
+      </Text>
     </Pressable>
   );
 }
@@ -1172,6 +1594,63 @@ function Action({label, onPress}: {label: string; onPress: () => void}) {
       style={styles.action}
       onPress={onPress}>
       <Text style={styles.actionText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function ArrowButton({direction, onPress}: {direction: 'up' | 'down'; onPress: () => void}) {
+  return (
+    <Pressable
+      style={[styles.gridButton, styles.arrowButton]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={direction === 'up' ? 'Move up' : 'Move down'}>
+      <Icon name={direction === 'up' ? 'arrowUp' : 'arrowDown'} size={17} color="#ffffff" />
+    </Pressable>
+  );
+}
+
+function GridButton({label, onPress}: {label: string; onPress: () => void}) {
+  return (
+    <Pressable
+      style={styles.gridButton}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}>
+      <Text style={styles.gridButtonText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+const pastels = {
+  mint: '#d3efe0',
+  sky: '#d8e6f8',
+  peach: '#fde3d3',
+  lilac: '#e9def8',
+};
+
+/** Flat pastel action button with dark text, matching the soft card palette. */
+function PastelButton({
+  label,
+  accessibilityLabel,
+  icon,
+  color,
+  onPress,
+}: {
+  label: string;
+  accessibilityLabel?: string;
+  icon: IconName;
+  color: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={[styles.pastelButton, {backgroundColor: color}]}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      onPress={onPress}>
+      <Icon name={icon} size={icon === 'symbolAddBold' ? 26 : 20} color="#1f2d38" />
+      <Text style={styles.pastelButtonText}>{label}</Text>
     </Pressable>
   );
 }
@@ -1200,7 +1679,117 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#d9dee3',
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  settingsButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
+  },
+  pastelButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 46,
+    borderRadius: 12,
+  },
+  pastelButtonText: {
+    fontFamily: 'sans-serif-condensed',
+    color: '#1f2d38',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  addRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  textured: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: 'rgba(31,45,56,0.12)',
+  },
+  texturedImage: {
+    borderRadius: 12,
+  },
+  untextured: {
+    backgroundColor: '#eef1f4',
+  },
+  addButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 46,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#168f5c',
+    backgroundColor: '#f2faf6',
+  },
+  addButtonText: {
+    color: '#126b46',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#c8d8e8',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 17,
+    color: '#1f2d38',
+    backgroundColor: '#ffffff',
+  },
+  stepTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  removeButton: {
+    marginLeft: 'auto',
+    padding: 4,
+  },
+  workoutCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 10,
+    paddingVertical: 4,
+    paddingLeft: 12,
+    paddingRight: 6,
+  },
+  workoutInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  workoutButtons: {
+    gap: 3,
+    alignItems: 'flex-end',
+  },
+  workoutButton: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(31,45,56,0.15)',
+  },
   title: {
+    flexShrink: 1,
+    fontFamily: 'sans-serif-condensed',
     color: '#1f2d38',
     fontSize: 30,
     fontWeight: '700',
@@ -1252,20 +1841,32 @@ const styles = StyleSheet.create({
     backgroundColor: '#f4f8fc',
   },
   stepCard: {
-    minHeight: 110,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#d9dee3',
     borderRadius: 8,
-    padding: 10,
-    gap: 12,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    gap: 8,
   },
   stepMain: {
     flex: 1,
-    gap: 8,
+    gap: 2,
+  },
+  stepName: {
+    flexShrink: 1,
+    fontFamily: 'sans-serif-condensed',
+    color: '#1f2d38',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  stepMeta: {
+    color: '#697782',
+    fontSize: 12,
   },
   cardTitle: {
+    fontFamily: 'sans-serif-condensed',
     color: '#1f2d38',
     fontSize: 20,
     fontWeight: '700',
@@ -1304,8 +1905,9 @@ const styles = StyleSheet.create({
     height: 96,
   },
   stepThumb: {
-    width: 128,
-    height: 128,
+    flex: 1, // half the card; the text and controls take the other half
+    aspectRatio: 2.1, // a bit flatter than the 16:9 GIFs (fitted inside, not cropped) to keep rows short
+    borderRadius: 8,
   },
   restSetting: {
     gap: 6,
@@ -1356,6 +1958,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   exerciseName: {
+    fontFamily: 'sans-serif-condensed',
     color: '#1f2d38',
     fontSize: 17,
     fontWeight: '600',
@@ -1384,31 +1987,6 @@ const styles = StyleSheet.create({
     width: '100%',
     flex: 1,
     minHeight: 0,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  chip: {
-    borderWidth: 1,
-    borderColor: '#c8d8e8',
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#f7fbff',
-  },
-  chipActive: {
-    borderColor: '#168f5c',
-    backgroundColor: '#eaf7f1',
-  },
-  chipText: {
-    color: '#226fb8',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  chipTextActive: {
-    color: '#126b46',
   },
   sideRow: {
     flexDirection: 'row',
@@ -1453,8 +2031,9 @@ const styles = StyleSheet.create({
   },
   iconCaption: {
     color: '#226fb8',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
+    paddingHorizontal: 2,
   },
   action: {
     alignItems: 'center',
@@ -1478,31 +2057,29 @@ const styles = StyleSheet.create({
   actionTextDisabled: {
     color: '#9aa4ad',
   },
-  segment: {
+  editGrid: {
+    gap: 3,
+  },
+  editRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    gap: 3,
   },
-  segmentOption: {
-    flexGrow: 1,
-    flexBasis: '45%',
+  gridButton: {
+    flex: 1,
+    minHeight: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#d9dee3',
-    borderRadius: 8,
-    padding: 10,
+    borderColor: '#c8d8e8',
+    backgroundColor: '#f7fbff',
   },
-  segmentOptionActive: {
-    borderColor: '#168f5c',
-    backgroundColor: '#eaf7f1',
+  arrowButton: {
+    borderColor: '#226fb8',
+    backgroundColor: '#226fb8',
   },
-  segmentText: {
-    color: '#52606d',
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  segmentTextActive: {
-    color: '#126b46',
+  gridSpacer: {
+    flex: 1,
   },
   smallControlRow: {
     flexDirection: 'row',
@@ -1518,49 +2095,79 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#f7fbff',
   },
+  gridButtonText: {
+    color: '#226fb8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   smallButtonText: {
     color: '#226fb8',
     fontSize: 13,
     fontWeight: '700',
     textAlign: 'center',
   },
-  calendarHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  dayGroup: {
+    gap: 6,
   },
-  calendarRow: {
-    flexDirection: 'row',
-  },
-  calendarWeekday: {
-    flex: 1,
-    textAlign: 'center',
-    color: '#697782',
-    fontSize: 13,
+  dayLabel: {
+    fontFamily: 'sans-serif-condensed',
+    color: '#52606d',
+    fontSize: 16,
     fontWeight: '700',
+    marginTop: 4,
   },
-  calendarCell: {
-    flex: 1,
-    aspectRatio: 1,
+  sessionCard: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    margin: 2,
-    borderRadius: 6,
+    gap: 10,
+    borderRadius: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
   },
-  calendarCellActive: {
-    backgroundColor: '#168f5c',
+  sessionMain: {
+    flex: 1,
+    gap: 2,
   },
-  calendarCellToday: {
-    borderWidth: 2,
-    borderColor: '#226fb8',
-  },
-  calendarDay: {
+  sessionTitle: {
+    flexShrink: 1,
+    fontFamily: 'sans-serif-condensed',
     color: '#1f2d38',
-    fontSize: 15,
-  },
-  calendarDayActive: {
-    color: '#ffffff',
+    fontSize: 16,
     fontWeight: '700',
+  },
+  sessionDuration: {
+    fontFamily: 'sans-serif-condensed',
+    color: '#1f2d38',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  byWorkoutRow: {
+    borderRadius: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    gap: 3,
+  },
+  byWorkoutHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  byWorkoutCount: {
+    marginLeft: 'auto',
+    fontFamily: 'sans-serif-condensed',
+    color: '#1f2d38',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  barTrack: {
+    height: 5,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    overflow: 'hidden',
+  },
+  barFill: {
+    height: '100%',
+    borderRadius: 4,
   },
   statGrid: {
     flexDirection: 'row',
