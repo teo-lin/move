@@ -28,7 +28,7 @@ jest.mock('../src/native/MoveStorage', () => ({
     setString: jest.fn(() => Promise.resolve(true)),
     exportCsv: jest.fn(() => Promise.resolve('Download/move/back-exercises.csv')),
     speak: jest.fn(() => Promise.resolve(true)),
-    click: jest.fn(() => Promise.resolve(true)),
+    countdownRoll: jest.fn(() => Promise.resolve(true)),
     repChime: jest.fn(() => Promise.resolve(true)),
     finishChime: jest.fn(() => Promise.resolve(true)),
     restChime: jest.fn(() => Promise.resolve(true)),
@@ -97,4 +97,29 @@ test('auto-advances once after a two-sided exercise finishes', async () => {
   expect(moveStorageMock.restChime).toHaveBeenCalledTimes(1);
   // The screen is kept on while the workout runs.
   expect(moveStorageMock.setKeepAwake).toHaveBeenCalledWith(true);
+});
+
+test('inserting a breather saves it in the workout and offers to skip it', async () => {
+  let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<App />);
+    await Promise.resolve();
+  });
+  await ReactTestRenderer.act(async () => {
+    renderer!.root.findByProps({accessibilityLabel: 'Start guided workout'}).props.onPress();
+    await Promise.resolve();
+  });
+
+  await ReactTestRenderer.act(async () => {
+    renderer!.root.findByProps({accessibilityLabel: 'Insert breather'}).props.onPress();
+    await Promise.resolve();
+  });
+
+  // The button turns into "Skip breather" and the workout (with the breather) is persisted.
+  expect(renderer!.root.findAllByProps({accessibilityLabel: 'Skip breather'}).length).toBeGreaterThan(0);
+  const saved = moveStorageMock.setString.mock.calls.filter(([key]) => key === 'workouts-v2').pop();
+  expect(saved).toBeDefined();
+  const steps = JSON.parse(saved![1])[0].steps;
+  expect(steps.map((s: {breather?: boolean}) => !!s.breather)).toEqual([false, true, false]);
+  expect(steps[1].secondsPerRep).toBe(4);
 });

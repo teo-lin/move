@@ -115,8 +115,8 @@ class MoveStorageModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun click(promise: Promise) {
-    cues.play("tick")
+  fun countdownRoll(promise: Promise) {
+    cues.play("roll")
     promise.resolve(true)
   }
 

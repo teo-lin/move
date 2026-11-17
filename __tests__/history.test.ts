@@ -70,6 +70,11 @@ test('every routine references a bundled exercise, including the new 121 Wall pu
     }
   }
   expect(exercisesById.get(121)?.name).toBe('Wall push-up');
+  // Scanned from the original app: per-side moves.
+  const sided = (id: string) =>
+    workouts.find(w => w.id === id)!.steps.filter(s => s.twoSides).map(s => s.exerciseId);
+  expect(sided('pespate-abs')).toEqual([7, 39, 34, 36]);
+  expect(sided('patrulabe-upper-body')).toEqual([52]);
   expect(workouts.map(w => w.id)).toEqual(
     expect.arrayContaining(['core-first-a', 'core-first-b', 'office-micro']),
   );

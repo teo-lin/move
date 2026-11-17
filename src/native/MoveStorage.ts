@@ -13,7 +13,7 @@ type MoveStorageModule = {
   setString(key: string, value: string): Promise<boolean>;
   exportCsv(fileName: string, csv: string): Promise<string>;
   speak(text: string): Promise<boolean>;
-  click(): Promise<boolean>;
+  countdownRoll(): Promise<boolean>;
   repChime(): Promise<boolean>;
   finishChime(): Promise<boolean>;
   restChime(): Promise<boolean>;

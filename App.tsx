@@ -15,9 +15,11 @@ import {
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 
-import {Exercise, exerciseLabel, exercises, exercisesById} from './src/data/exercises';
+import {Exercise, exercises, exercisesById} from './src/data/exercises';
 import {
+  breatherStep,
   csvWorkoutLabel,
+  exerciseCount,
   mergeSavedWorkouts,
   serializeWorkoutSettings,
   workoutLabel,
@@ -43,12 +45,11 @@ import {
   weekdayLabels,
 } from './src/data/history';
 import {MoveStorage, SpeechSettings} from './src/native/MoveStorage';
+import {Icon, IconName} from './src/ui/Icon';
 
 type Screen = 'workouts' | 'catalog' | 'history' | 'stats';
 type Phase = 'announce' | 'countdown' | 'work' | 'change-side' | 'finishing' | 'rest';
 
-const BREATHER_SECONDS = 20;
-const BREATHER_EXTRA_SECONDS = 15;
 
 export default function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>('workouts');
@@ -66,6 +67,7 @@ export default function App(): React.JSX.Element {
   const [startedAt, setStartedAt] = useState(0);
   const [restRemaining, setRestRemaining] = useState(0);
   const [restTotal, setRestTotal] = useState(0);
+  const [skipBreatherAt, setSkipBreatherAt] = useState<number | null>(null);
   const [, setClock] = useState(0);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [detailExerciseId, setDetailExerciseId] = useState<number | null>(null);
@@ -130,7 +132,11 @@ export default function App(): React.JSX.Element {
         });
     };
 
-    if (phase === 'announce') {
+    if (phase === 'announce' && activeStep.breather) {
+      setRestTotal(activeStep.secondsPerRep);
+      setRestRemaining(activeStep.secondsPerRep);
+      setPhase('rest');
+    } else if (phase === 'announce') {
       const name = exercisesById.get(activeStep.exerciseId)?.name ?? 'Exercise';
       speakThen(
         activeStep.twoSides ? `${name}, left` : name,
@@ -144,7 +150,10 @@ export default function App(): React.JSX.Element {
 
     if (phase === 'countdown') {
       if (countdown > 0) {
-        fire(MoveStorage.click());
+        if (countdown === 5) {
+          // One accelerating drum roll spans the whole 5-second countdown.
+          fire(MoveStorage.countdownRoll());
+        }
         timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       } else {
         fire(MoveStorage.speak('Go'));
@@ -203,7 +212,10 @@ export default function App(): React.JSX.Element {
         timer = setTimeout(() => setRestRemaining(restRemaining - 1), 1000);
       } else {
         fire(MoveStorage.restChime());
-        timer = setTimeout(() => setPhase('announce'), 900);
+        timer = setTimeout(
+          () => (activeStep.breather ? advanceAfterExercise() : setPhase('announce')),
+          900,
+        );
       }
     }
 
@@ -215,7 +227,7 @@ export default function App(): React.JSX.Element {
     };
     // The timer intentionally captures the current playback state for one tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWorkout, activeStep, activeIndex, countdown, phase, rep, sideChanged, paused, restRemaining]);
+  }, [activeWorkout?.id, activeStep, activeIndex, countdown, phase, rep, sideChanged, paused, restRemaining]);
 
   const elapsed = startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0;
 
@@ -233,7 +245,51 @@ export default function App(): React.JSX.Element {
     setSideChanged(false);
     setPaused(false);
     setCompletedSteps(workout.steps.map(() => false));
+    setSkipBreatherAt(null);
     setStartedAt(Date.now());
+  }
+
+  function goToStep(index: number) {
+    setActiveIndex(index);
+    setCountdown(5);
+    setRep(0);
+    setSideChanged(false);
+    setPaused(false);
+    setPhase('announce');
+  }
+
+  /** Index of the step after `index`, skipping a breather the user chose to skip. */
+  function stepAfter(index: number): number {
+    const next = index + 1;
+    const steps = activeWorkout?.steps ?? [];
+    return next < steps.length && steps[next].breather && skipBreatherAt === next ? next + 1 : next;
+  }
+
+  /** Inserts a 4 s breather after the current exercise and saves it in the workout. */
+  function insertBreather() {
+    if (!activeWorkout) {
+      return;
+    }
+    const at = activeIndex + 1;
+    const steps = [...activeWorkout.steps];
+    steps.splice(at, 0, breatherStep());
+    setActiveWorkout({...activeWorkout, steps});
+    setCompletedSteps(current => {
+      const next = [...current];
+      next.splice(at, 0, false);
+      return next;
+    });
+    setWorkouts(list => list.map(item => (item.id === activeWorkout.id ? {...item, steps} : item)));
+  }
+
+  function skipBreather() {
+    if (activeStep?.breather) {
+      fire(MoveStorage.stopAudio());
+      setRestRemaining(0);
+      advanceAfterExercise();
+    } else {
+      setSkipBreatherAt(activeIndex + 1);
+    }
   }
 
   function startRest(seconds: number) {
@@ -247,16 +303,6 @@ export default function App(): React.JSX.Element {
     setPhase('rest');
   }
 
-  /** Runner "breather" button: pause for a breath, then redo the current exercise. */
-  function takeBreather() {
-    if (phase === 'rest') {
-      setRestTotal(total => total + BREATHER_EXTRA_SECONDS);
-      setRestRemaining(remaining => remaining + BREATHER_EXTRA_SECONDS);
-      return;
-    }
-    startRest(Math.max(BREATHER_SECONDS, activeWorkout?.restSeconds ?? 0));
-  }
-
   function restartCurrentExercise() {
     fire(MoveStorage.stopAudio());
     setPhase('announce');
@@ -267,16 +313,18 @@ export default function App(): React.JSX.Element {
   }
 
   function previousExercise() {
-    if (activeIndex === 0) {
+    if (!activeWorkout) {
+      return;
+    }
+    let index = activeIndex - 1;
+    while (index > 0 && activeWorkout.steps[index].breather) {
+      index--;
+    }
+    if (index < 0 || activeWorkout.steps[index].breather) {
       return;
     }
     fire(MoveStorage.stopAudio());
-    setActiveIndex(activeIndex - 1);
-    setPhase('announce');
-    setCountdown(5);
-    setRep(0);
-    setSideChanged(false);
-    setPaused(false);
+    goToStep(index);
   }
 
   function nextExercise() {
@@ -284,18 +332,14 @@ export default function App(): React.JSX.Element {
       return;
     }
     fire(MoveStorage.stopAudio());
-    if (phase === 'rest') {
+    if (phase === 'rest' && !activeStep?.breather) {
       setRestRemaining(0);
       setPhase('announce');
       return;
     }
-    if (activeIndex < activeWorkout.steps.length - 1) {
-      setActiveIndex(activeIndex + 1);
-      setPhase('announce');
-      setCountdown(5);
-      setRep(0);
-      setSideChanged(false);
-      setPaused(false);
+    const next = stepAfter(activeIndex);
+    if (next < activeWorkout.steps.length) {
+      goToStep(next);
     } else {
       finishWorkout(false);
     }
@@ -305,20 +349,16 @@ export default function App(): React.JSX.Element {
     if (!activeWorkout) {
       return;
     }
-    if (activeIndex < activeWorkout.steps.length - 1) {
-      setActiveIndex(activeIndex + 1);
-      setCountdown(5);
-      setRep(0);
-      setSideChanged(false);
-      setPaused(false);
-      const rest = activeWorkout.restSeconds ?? 0;
-      if (rest > 0) {
-        startRest(rest);
-      } else {
-        setPhase('announce');
-      }
-    } else {
+    const next = stepAfter(activeIndex);
+    if (next >= activeWorkout.steps.length) {
       finishWorkout(true);
+      return;
+    }
+    const rest = activeWorkout.restSeconds ?? 0;
+    const betweenExercises = !activeWorkout.steps[activeIndex].breather && !activeWorkout.steps[next].breather;
+    goToStep(next);
+    if (rest > 0 && betweenExercises) {
+      startRest(rest);
     }
   }
 
@@ -337,14 +377,14 @@ export default function App(): React.JSX.Element {
     fire(MoveStorage.stopAudio());
 
     const completed = autoCompleted
-      ? activeWorkout.steps.length
-      : completedSteps.filter(Boolean).length;
+      ? exerciseCount(activeWorkout)
+      : completedSteps.filter((done, index) => done && !activeWorkout.steps[index]?.breather).length;
     const entry: SessionEntry = {
       id: `${Date.now()}`,
       timestamp: Date.now(),
       workout: workoutLabel(activeWorkout),
       completed,
-      total: activeWorkout.steps.length,
+      total: exerciseCount(activeWorkout),
       durationSeconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
     };
 
@@ -367,6 +407,13 @@ export default function App(): React.JSX.Element {
       steps: workout.steps.map((step, stepIndex) =>
         stepIndex === index ? {...step, ...patch} : step,
       ),
+    }));
+  }
+
+  function removeStep(index: number) {
+    updateSelectedWorkout(workout => ({
+      ...workout,
+      steps: workout.steps.filter((_, stepIndex) => stepIndex !== index),
     }));
   }
 
@@ -441,19 +488,25 @@ export default function App(): React.JSX.Element {
       <Shell title={workoutLabel(activeWorkout)} screen={screen} setScreen={setScreen}>
         <View style={styles.runner}>
           <Text style={styles.meta}>
-            {activeIndex + 1} / {activeWorkout.steps.length} · {phaseLabel(phase, countdown)} ·{' '}
+            {activeWorkout.steps.slice(0, activeIndex + 1).filter(item => !item.breather).length} /{' '}
+            {exerciseCount(activeWorkout)} · {activeStep.breather ? 'breather' : phaseLabel(phase, countdown)} ·{' '}
             {formatDuration(elapsed)}
           </Text>
           {phase === 'rest' ? (
             <View style={styles.restPanel}>
-              <Text style={styles.restTitle}>Catch your breath</Text>
+              <Text style={styles.restTitle}>{activeStep.breather ? 'Breather' : 'Rest'}</Text>
               <Text style={styles.restCount}>{restRemaining}s</Text>
               <SegmentBar total={1} done={0} fill={restTotal > 0 ? restRemaining / restTotal : 0} />
-              {activeExercise && (
-                <Text style={styles.meta}>
-                  Up next: {exerciseLabel(activeExercise.id)} {activeExercise.name}
-                </Text>
-              )}
+              {(() => {
+                const upcoming = activeStep.breather
+                  ? exercisesById.get(activeWorkout.steps[stepAfter(activeIndex)]?.exerciseId ?? -1)
+                  : activeExercise;
+                return upcoming ? (
+                  <Text style={styles.meta}>
+                    Up next: {upcoming.name}
+                  </Text>
+                ) : null;
+              })()}
             </View>
           ) : activeExercise ? (
             <ExercisePreview exercise={activeExercise} fill />
@@ -475,29 +528,50 @@ export default function App(): React.JSX.Element {
                 running={phase === 'work' && !paused}
               />
               <Text style={styles.prescription}>
-                {activeStep.repetitions} reps · {activeStep.secondsPerRep}s per rep
-                {activeStep.twoSides ? ' · change side halfway' : ''}
+                {activeStep.twoSides
+                  ? `${activeStep.repetitions / 2} per side`
+                  : `${activeStep.repetitions} reps`}{' '}
+                · {activeStep.secondsPerRep}s each
               </Text>
             </>
           )}
           <View style={styles.iconRow}>
-            <IconButton label="Previous" icon="‹" disabled={activeIndex === 0} onPress={previousExercise} />
-            <IconButton label="Repeat" icon="↻" onPress={restartCurrentExercise} />
             <IconButton
-              label={phase === 'rest' ? `Add ${BREATHER_EXTRA_SECONDS} seconds` : 'Catch your breath'}
-              icon={phase === 'rest' ? '+' : '≈'}
-              onPress={takeBreather}
+              label="Previous"
+              caption="Back"
+              icon="previous"
+              disabled={activeWorkout.steps.slice(0, activeIndex).every(item => item.breather)}
+              onPress={previousExercise}
             />
+            <IconButton label="Repeat" caption="Repeat" icon="replay" onPress={restartCurrentExercise} />
+            {(() => {
+              const nextIsBreather = activeWorkout.steps[activeIndex + 1]?.breather === true;
+              if (activeStep.breather || (nextIsBreather && skipBreatherAt !== activeIndex + 1)) {
+                return <IconButton label="Skip breather" caption="Skip" icon="skip" onPress={skipBreather} />;
+              }
+              if (nextIsBreather) {
+                return (
+                  <IconButton label="Breather skipped" caption="Skipped" icon="skip" disabled onPress={skipBreather} />
+                );
+              }
+              return (
+                <IconButton label="Insert breather" caption="Breather" icon="breather" onPress={insertBreather} />
+              );
+            })()}
             <IconButton
               label={paused ? 'Resume' : 'Pause'}
-              icon={paused ? '▶' : 'Ⅱ'}
+              caption={paused ? 'Resume' : 'Pause'}
+              icon={paused ? 'play' : 'pause'}
               onPress={() => {
                 fire(MoveStorage.stopAudio());
+                if (paused && phase === 'countdown') {
+                  setCountdown(5); // the drum roll was cut off: restart it on resume
+                }
                 setPaused(!paused);
               }}
             />
-            <IconButton label="Next" icon="›" onPress={nextExercise} />
-            <IconButton label="Finish workout" icon="■" onPress={() => finishWorkout(false)} />
+            <IconButton label="Next" caption="Next" icon="next" onPress={nextExercise} />
+            <IconButton label="Finish workout" caption="Finish" icon="stop" onPress={() => finishWorkout(false)} />
           </View>
         </View>
       </Shell>
@@ -528,7 +602,7 @@ export default function App(): React.JSX.Element {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{workoutLabel(selectedWorkout)}</Text>
             <Text style={styles.meta}>
-              {selectedWorkout.steps.length} exercises · about{' '}
+              {exerciseCount(selectedWorkout)} exercises · about{' '}
               {Math.round(estimateSeconds(selectedWorkout) / 60)} min with cues
             </Text>
             <View style={styles.restSetting}>
@@ -561,29 +635,54 @@ export default function App(): React.JSX.Element {
           </View>
 
           {selectedWorkout.steps.map((step, index) => {
+            if (step.breather) {
+              return (
+                <View style={styles.breatherCard} key={`breather-${index}`}>
+                  <Text style={styles.bodyText}>≈ Breather · {step.secondsPerRep}s</Text>
+                  <View style={styles.smallControlRow}>
+                    <SmallButton label="↑" onPress={() => moveStep(index, -1)} />
+                    <SmallButton label="↓" onPress={() => moveStep(index, 1)} />
+                    <SmallButton
+                      label="- sec"
+                      onPress={() => updateStep(index, {secondsPerRep: Math.max(1, step.secondsPerRep - 1)})}
+                    />
+                    <SmallButton label="+ sec" onPress={() => updateStep(index, {secondsPerRep: step.secondsPerRep + 1})} />
+                    <SmallButton label="remove" onPress={() => removeStep(index)} />
+                  </View>
+                </View>
+              );
+            }
             const exercise = exercisesById.get(step.exerciseId);
+            const number = selectedWorkout.steps.slice(0, index + 1).filter(item => !item.breather).length;
             return (
               <View style={styles.stepCard} key={`${step.exerciseId}-${index}`}>
                 {exercise && <Image source={exercise.asset} style={styles.stepThumb} resizeMode="contain" />}
                 <View style={styles.stepMain}>
                   <Text style={styles.exerciseName}>
-                    {index + 1}. {exercise ? exercise.name : `Exercise ${step.exerciseId}`}
+                    {number}. {exercise ? exercise.name : `Exercise ${step.exerciseId}`}
                   </Text>
                   <Text style={styles.meta}>
-                    {exerciseLabel(step.exerciseId)} · {step.repetitions} reps · {step.secondsPerRep}s
-                    {step.twoSides ? ' · two sides' : ''}
+                    {step.twoSides
+                      ? `${step.repetitions / 2} per side (left, then right)`
+                      : `${step.repetitions} reps`}{' '}
+                    · {step.secondsPerRep}s each
                   </Text>
                   <View style={styles.smallControlRow}>
                     <SmallButton label="↑" onPress={() => moveStep(index, -1)} />
                     <SmallButton label="↓" onPress={() => moveStep(index, 1)} />
-                    <SmallButton label="- rep" onPress={() => updateStep(index, {repetitions: Math.max(1, step.repetitions - 1)})} />
-                    <SmallButton label="+ rep" onPress={() => updateStep(index, {repetitions: step.repetitions + 1})} />
+                    <SmallButton
+                      label="- rep"
+                      onPress={() => {
+                        const unit = step.twoSides ? 2 : 1;
+                        updateStep(index, {repetitions: Math.max(unit, step.repetitions - unit)});
+                      }}
+                    />
+                    <SmallButton
+                      label="+ rep"
+                      onPress={() => updateStep(index, {repetitions: step.repetitions + (step.twoSides ? 2 : 1)})}
+                    />
                     <SmallButton label="- sec" onPress={() => updateStep(index, {secondsPerRep: Math.max(1, step.secondsPerRep - 1)})} />
                     <SmallButton label="+ sec" onPress={() => updateStep(index, {secondsPerRep: step.secondsPerRep + 1})} />
-                    <SmallButton
-                      label={step.twoSides ? 'side on' : 'side off'}
-                      onPress={() => updateStep(index, {twoSides: !step.twoSides})}
-                    />
                   </View>
                 </View>
               </View>
@@ -727,10 +826,12 @@ const monthNames = [
 
 /** Rough length including the spoken name, countdowns and side changes. */
 function estimateSeconds(workout: Workout): number {
-  const rests = Math.max(0, workout.steps.length - 1) * ((workout.restSeconds ?? 0) + 1);
+  const rests = Math.max(0, exerciseCount(workout) - 1) * ((workout.restSeconds ?? 0) + 1);
   return workout.steps.reduce(
     (total, item) =>
-      total + 1.6 + 5.6 + item.repetitions * item.secondsPerRep + 0.7 + (item.twoSides ? 7 : 0),
+      item.breather
+        ? total + item.secondsPerRep + 1
+        : total + 2 + 5.6 + item.repetitions * item.secondsPerRep + 0.7 + (item.twoSides ? 7.5 : 0),
     rests,
   );
 }
@@ -1010,7 +1111,6 @@ function ExerciseRow({exercise, onPress}: {exercise: Exercise; onPress: () => vo
       <Image source={exercise.asset} style={styles.thumb} resizeMode="contain" />
       <View style={styles.exerciseText}>
         <Text style={styles.exerciseName}>{exercise.name}</Text>
-        <Text style={styles.meta}>{exerciseLabel(exercise.id)}</Text>
       </View>
     </Pressable>
   );
@@ -1033,21 +1133,21 @@ function ExercisePreview({
         style={fill ? styles.previewImageFill : large ? styles.previewImageLarge : styles.previewImage}
         resizeMode="contain"
       />
-      <Text style={styles.cardTitle}>
-        {exerciseLabel(exercise.id)} {exercise.name}
-      </Text>
+      <Text style={styles.cardTitle}>{exercise.name}</Text>
     </View>
   );
 }
 
 function IconButton({
   label,
+  caption,
   icon,
   onPress,
   disabled = false,
 }: {
   label: string;
-  icon: string;
+  caption: string;
+  icon: IconName;
   onPress: () => void;
   disabled?: boolean;
 }) {
@@ -1058,7 +1158,8 @@ function IconButton({
       disabled={disabled}
       style={[styles.iconButton, disabled && styles.actionDisabled]}
       onPress={onPress}>
-      <Text style={[styles.iconText, disabled && styles.actionTextDisabled]}>{icon}</Text>
+      <Icon name={icon} size={30} color={disabled ? '#9aa4ad' : '#226fb8'} />
+      <Text style={[styles.iconCaption, disabled && styles.actionTextDisabled]}>{caption}</Text>
     </Pressable>
   );
 }
@@ -1140,6 +1241,15 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 10,
     backgroundColor: '#fbfcfd',
+  },
+  breatherCard: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#8fb3d9',
+    borderRadius: 8,
+    padding: 10,
+    gap: 8,
+    backgroundColor: '#f4f8fc',
   },
   stepCard: {
     minHeight: 110,
@@ -1332,7 +1442,8 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     flex: 1,
-    height: 56,
+    height: 64,
+    gap: 2,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
@@ -1340,10 +1451,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#c8d8e8',
   },
-  iconText: {
+  iconCaption: {
     color: '#226fb8',
-    fontSize: 28,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '600',
   },
   action: {
     alignItems: 'center',

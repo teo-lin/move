@@ -1,14 +1,14 @@
 """Generate the runner's percussion cues as WAV files (original synthesis, no samples).
 
-    countdown tick  -> maraca shake        res/raw/cue_tick.wav
-    repetition      -> castanet double click res/raw/cue_rep.wav
-    exercise done   -> cuica rising "whoop" + castanet roll   res/raw/cue_finish.wav
-    rest finished   -> two soft falling cuica "hoo"s           res/raw/cue_rest.wav
+    countdown       -> soft tom taps, slowly speeding up over 5 s  res/raw/cue_countdown.wav
+    repetition      -> one soft castanet click                      res/raw/cue_rep.wav
+    exercise done   -> one pure rising cuica "whoop"               res/raw/cue_finish.wav
+    rest finished   -> one pure falling cuica "hoo"                res/raw/cue_rest.wav
 
 Usage (from the repo root):
     python scripts/make-cue-sounds.py [--preview path/to/preview.wav]
 
---preview also writes a short demo sequence (countdown, reps, finish, rest end) for listening.
+--preview also writes a short demo sequence (countdown roll, reps, finish, rest end) for listening.
 """
 
 import argparse
@@ -62,13 +62,26 @@ def fade_edges(x, ms=4):
     return x
 
 
-def maraca(seconds=0.13):
-    """Seeds hitting a gourd: dense grains of high band-passed noise with a quick swell and decay."""
-    t = t_axis(seconds)
-    grains = (rng.random(len(t)) < 0.12) * rng.normal(0, 1, len(t))
-    texture = bandpass(grains + 0.25 * rng.normal(0, 1, len(t)), 5200, 1.1)
-    envelope = np.minimum(1, t / 0.012) * np.exp(-np.maximum(0, t - 0.012) / 0.035)
-    return texture * envelope
+def tom_tap():
+    """Fingertip on a low tom: a rounded, muffled thump with a hint of skin, no snare wires."""
+    t = t_axis(0.16)
+    pitch = 150 * (1 + 0.15 * np.exp(-t / 0.02))  # slight pitch drop like a real drum head
+    phase = 2 * math.pi * np.cumsum(pitch) / RATE
+    body = np.sin(phase) * np.exp(-t / 0.06)
+    skin = bandpass(rng.normal(0, 1, len(t)), 900, 1.2) * np.exp(-t / 0.012) * 0.25
+    return body + skin
+
+
+def drum_roll(seconds=5.0):
+    """Gentle taps ~0.7 s apart that slowly speed up to ~0.18 s, swelling only slightly toward "Go"."""
+    out = np.zeros(int(RATE * seconds))
+    t = 0.0
+    end = seconds - 0.16
+    while t < end:
+        progress = t / end
+        place(out, tom_tap(), t, 0.55 + 0.45 * progress)
+        t += max(0.18, 0.7 * math.exp(-0.32 * t))
+    return out
 
 
 def castanet_click():
@@ -95,28 +108,19 @@ def cuica(f_start, f_end, seconds, glide):
     t = t_axis(seconds)
     shape = np.minimum(1, t / glide)
     freq = f_start * (f_end / f_start) ** (shape * (2 - shape))  # ease-out glide
-    freq = freq * (1 + 0.012 * np.sin(2 * math.pi * 6.5 * t))
     phase = 2 * math.pi * np.cumsum(freq) / RATE
-    tone = np.sin(phase) + 0.45 * np.sin(2 * phase + 0.3) + 0.18 * np.sin(3 * phase + 0.7)
-    rub = bandpass(rng.normal(0, 1, len(t)), float(np.mean(freq)) * 2, 2.5) * 0.25
-    envelope = np.minimum(1, t / 0.025) * np.minimum(1, (seconds - t) / 0.09)
-    return (tone + rub) * envelope
+    tone = np.sin(phase) + 0.2 * np.sin(2 * phase)
+    # Dry: no resonant noise layer (it rang like an echo) and a quick, clean release.
+    envelope = np.minimum(1, t / 0.02) * np.minimum(1, (seconds - t) / 0.05)
+    return tone * envelope
 
 
 def build():
-    tick = normalize(fade_edges(maraca()), 0.40)
-    rep = normalize(fade_edges(castanets([1.0, 0.75], 0.042)), 0.55)
-
-    finish = np.zeros(int(RATE * 0.85))
-    place(finish, normalize(cuica(330, 720, 0.34, 0.20), 1.0), 0.0, 0.85)
-    place(finish, normalize(castanets([0.8, 0.7, 0.9, 1.0], 0.055), 1.0), 0.40, 0.75)
-    finish = normalize(fade_edges(finish), 0.55)
-
-    rest = np.zeros(int(RATE * 0.95))
-    place(rest, normalize(cuica(560, 300, 0.32, 0.26), 1.0), 0.0, 0.9)
-    place(rest, normalize(cuica(520, 280, 0.36, 0.30), 1.0), 0.42, 0.8)
-    rest = normalize(fade_edges(rest), 0.40)
-    return {"cue_tick": tick, "cue_rep": rep, "cue_finish": finish, "cue_rest": rest}
+    countdown = normalize(fade_edges(drum_roll()), 0.32)
+    rep = normalize(fade_edges(castanets([1.0], 0.0)), 0.42)
+    finish = normalize(fade_edges(cuica(330, 660, 0.24, 0.16)), 0.42)
+    rest = normalize(fade_edges(cuica(520, 300, 0.26, 0.2)), 0.34)
+    return {"cue_countdown": countdown, "cue_rep": rep, "cue_finish": finish, "cue_rest": rest}
 
 
 def write_wav(path, samples):
@@ -141,8 +145,7 @@ def main():
 
     if args.preview:
         demo = np.zeros(int(RATE * 16))
-        for i in range(5):  # countdown
-            place(demo, sounds["cue_tick"], 0.2 + i)
+        place(demo, sounds["cue_countdown"], 0.2)
         for i in range(1, 4):  # three reps at 2 s
             place(demo, sounds["cue_rep"], 5.8 + 2 * i)
         place(demo, sounds["cue_finish"], 13.8)

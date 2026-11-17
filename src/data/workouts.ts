@@ -13,32 +13,47 @@ export type WorkoutStep = {
   repetitions: number;
   secondsPerRep: number;
   twoSides?: boolean;
+  /** A short pause inside the workout; `secondsPerRep` is its length. */
+  breather?: boolean;
 };
 
-export const workoutsKey = 'workouts';
+export const BREATHER_SECONDS = 4;
+
+/** v2: only edited workouts are stored, so updated bundled defaults take effect. */
+export const workoutsKey = 'workouts-v2';
+
+export function breatherStep(seconds: number = BREATHER_SECONDS): WorkoutStep {
+  return {exerciseId: 0, repetitions: 1, secondsPerRep: seconds, breather: true};
+}
+
+export function exerciseCount(workout: Pick<Workout, 'steps'>): number {
+  return workout.steps.filter(item => !item.breather).length;
+}
 
 export const workouts: Workout[] = [
+  // Reps and seconds per rep as configured in the original Back Exercises app (scanned
+  // 17.11.2026). Its "Repeats per side" exercises use perSide().
   {
     id: 'pespate-abs',
     name: 'PeSpate: abs',
     emoji: '🦦',
     steps: [
-      step(3, 16, 3),
-      step(6, 16, 3),
-      step(7, 16, 3, true),
-      step(14, 16, 3, true),
-      step(16, 16, 3),
-      step(39, 16, 3, true),
-      step(15, 16, 3),
-      step(17, 16, 3),
-      step(18, 16, 3),
-      step(19, 16, 3),
-      step(20, 16, 3),
-      step(21, 16, 3),
-      step(9, 16, 3),
-      step(23, 16, 3),
-      step(34, 16, 3, true),
-      step(36, 16, 3),
+      step(3, 12, 2), // Windshield Wipers
+      step(6, 12, 2), // Straight Leg Scissors
+      perSide(7, 12, 3), // Diagonal crunches
+      step(14, 12, 3), // Straight leg lift
+      step(16, 16, 4), // Alternating knee to the chest
+      perSide(39, 20, 2), // Leg lift 3
+      step(15, 12, 3), // Toes to the knee
+      step(17, 16, 4), // Two knees to the chest
+      step(18, 4, 6), // Fan
+      step(19, 8, 4), // Double crunch
+      step(20, 4, 16), // Leading knee twists
+      step(21, 12, 2), // Bug
+      step(9, 12, 3), // Bridge
+      step(23, 8, 4), // Rolling situp
+      perSide(34, 8, 4), // Side-lying kicks
+      perSide(36, 8, 3), // Both leg lift
     ],
   },
   {
@@ -46,21 +61,21 @@ export const workouts: Workout[] = [
     name: 'PatruLabe: upper body',
     emoji: '🐈',
     steps: [
-      step(53, 15, 3),
-      step(49, 15, 3),
-      step(50, 15, 3),
-      step(55, 15, 3),
-      step(51, 15, 3),
-      step(58, 15, 3, true),
-      step(60, 15, 3),
-      step(52, 15, 3),
-      step(77, 15, 3),
-      step(78, 15, 3),
-      step(82, 15, 3),
-      step(71, 15, 3),
-      step(79, 15, 3),
-      step(56, 15, 3),
-      step(46, 15, 3),
+      step(53, 4, 10), // Rolls
+      step(49, 4, 4), // Cat 3
+      step(50, 8, 2), // Tails
+      step(55, 20, 3), // Knee Pushups
+      step(51, 6, 4), // Bear
+      step(58, 24, 2), // Hunting dog
+      step(60, 24, 2), // Hunting dog 3
+      perSide(52, 12, 3), // Table
+      step(77, 6, 6), // Swimmer
+      step(78, 20, 3), // Hands to heels
+      step(82, 16, 3), // Cobra
+      step(71, 12, 3), // Boat 1
+      step(80, 8, 3), // Shoulder blade retraction and flys 2
+      step(56, 8, 3), // Full pushups
+      step(46, 6, 4), // Squat to heels
     ],
   },
   // body/sessions.md "Kineto session — Core-First A (L1)". "N/side" = N reps per side.
@@ -152,9 +167,19 @@ export function mergeSavedWorkouts(raw: string | null, defaults: Workout[] = wor
   }
 }
 
-export function serializeWorkoutSettings(list: Workout[]): string {
+/** Stores only workouts that differ from the bundled defaults. */
+export function serializeWorkoutSettings(list: Workout[], defaults: Workout[] = workouts): string {
   return JSON.stringify(
-    list.map(workout => ({id: workout.id, steps: workout.steps, restSeconds: workout.restSeconds ?? 0})),
+    list
+      .filter(workout => {
+        const base = defaults.find(item => item.id === workout.id);
+        return (
+          !base ||
+          JSON.stringify(base.steps) !== JSON.stringify(workout.steps) ||
+          (base.restSeconds ?? 0) !== (workout.restSeconds ?? 0)
+        );
+      })
+      .map(workout => ({id: workout.id, steps: workout.steps, restSeconds: workout.restSeconds ?? 0})),
   );
 }
 
