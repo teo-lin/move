@@ -352,6 +352,10 @@ export default function App(): React.JSX.Element {
                     <SmallButton label="+ rep" onPress={() => updateStep(index, {repetitions: step.repetitions + 1})} />
                     <SmallButton label="- sec" onPress={() => updateStep(index, {secondsPerRep: Math.max(1, step.secondsPerRep - 1)})} />
                     <SmallButton label="+ sec" onPress={() => updateStep(index, {secondsPerRep: step.secondsPerRep + 1})} />
+                    <SmallButton
+                      label={step.twoSides ? 'side on' : 'side off'}
+                      onPress={() => updateStep(index, {twoSides: !step.twoSides})}
+                    />
                   </View>
                 </View>
               </View>
