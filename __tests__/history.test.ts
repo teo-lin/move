@@ -158,3 +158,59 @@ test('catalog categories cover every bundled exercise exactly once', () => {
   );
   expect(groups.map((g: {title: string}) => g.title)).toContain('Standing');
 });
+
+test('every exercise has a description and the imported programs use real exercises', () => {
+  const {descriptions} = require('../src/data/descriptions');
+  const {exercises} = require('../src/data/exercises');
+  const {importedWorkouts} = require('../src/data/importedWorkouts');
+  for (const exercise of exercises) {
+    expect(typeof descriptions[exercise.id]).toBe('string');
+    expect(descriptions[exercise.id].length).toBeGreaterThan(40);
+  }
+  expect(importedWorkouts).toHaveLength(9);
+  const ids = new Set(exercises.map((e: {id: number}) => e.id));
+  for (const workout of importedWorkouts) {
+    for (const step of workout.steps) {
+      expect(ids.has(step.exerciseId)).toBe(true);
+      expect(step.repetitions).toBeGreaterThan(0);
+      expect(step.secondsPerRep).toBeGreaterThan(0);
+      if (step.twoSides) {
+        expect(step.repetitions % 2).toBe(0);
+      }
+    }
+  }
+});
+
+test('drag and drop: rows of different heights land where they are dropped', () => {
+  const {dropIndex, rowTops} = require('../src/ui/useDragReorder');
+  // Rows: exercise (100), breather (30), exercise (100), exercise (100); 10 between rows.
+  const heights = [100, 30, 100, 100];
+  expect(rowTops(heights, 4, 10)).toEqual([0, 110, 150, 260]);
+  expect(dropIndex(heights, 4, 10, 0, 0)).toBe(0); // not moved
+  expect(dropIndex(heights, 4, 10, 0, 100)).toBe(1); // past the breather's centre
+  expect(dropIndex(heights, 4, 10, 0, 400)).toBe(3); // to the very end
+  expect(dropIndex(heights, 4, 10, 3, -400)).toBe(0); // to the very top
+  expect(dropIndex(heights, 4, 10, 2, -60)).toBe(2); // centre 140 is still below the breather (125)
+  expect(dropIndex(heights, 4, 10, 2, -90)).toBe(1); // centre 110 is above it: lands before it
+  expect(dropIndex(heights, 4, 10, 1, 30)).toBe(1); // small nudge changes nothing
+});
+
+test('workout order: saved ids sort the list, unknown workouts keep their place at the end', () => {
+  const {applyWorkoutOrder, parseWorkoutOrder} = require('../src/data/workouts');
+  const list = ['a', 'b', 'c', 'd'].map(id => ({id}));
+  expect(applyWorkoutOrder(list, ['c', 'a']).map((w: {id: string}) => w.id)).toEqual([
+    'c',
+    'a',
+    'b',
+    'd',
+  ]);
+  expect(applyWorkoutOrder(list, []).map((w: {id: string}) => w.id)).toEqual(['a', 'b', 'c', 'd']);
+  expect(applyWorkoutOrder(list, ['d', 'zzz', 'b']).map((w: {id: string}) => w.id)).toEqual([
+    'd',
+    'b',
+    'a',
+    'c',
+  ]);
+  expect(parseWorkoutOrder('not json')).toEqual([]);
+  expect(parseWorkoutOrder('["x",1,"y"]')).toEqual(['x', 'y']);
+});

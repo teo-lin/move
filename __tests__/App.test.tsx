@@ -80,7 +80,7 @@ test('auto-advances once after a two-sided exercise finishes', async () => {
   const startButton = renderer!.root.findByProps({accessibilityLabel: 'Start Test Workout'});
 
   await ReactTestRenderer.act(async () => {
-    startButton.props.onPress();
+    startButton.props.onAccessibilityAction({nativeEvent: {actionName: 'activate'}});
     await Promise.resolve();
   });
 
@@ -106,7 +106,9 @@ test('inserting a breather saves it in the workout and offers to skip it', async
     await Promise.resolve();
   });
   await ReactTestRenderer.act(async () => {
-    renderer!.root.findByProps({accessibilityLabel: 'Start Test Workout'}).props.onPress();
+    renderer!.root
+      .findByProps({accessibilityLabel: 'Start Test Workout'})
+      .props.onAccessibilityAction({nativeEvent: {actionName: 'activate'}});
     await Promise.resolve();
   });
 
@@ -116,7 +118,9 @@ test('inserting a breather saves it in the workout and offers to skip it', async
   });
 
   // The button turns into "Skip breather" and the workout (with the breather) is persisted.
-  expect(renderer!.root.findAllByProps({accessibilityLabel: 'Skip breather'}).length).toBeGreaterThan(0);
+  expect(
+    renderer!.root.findAllByProps({accessibilityLabel: 'Skip breather'}).length,
+  ).toBeGreaterThan(0);
   const saved = moveStorageMock.setString.mock.calls.filter(([key]) => key === 'workouts-v2').pop();
   expect(saved).toBeDefined();
   const steps = JSON.parse(saved![1])[0].steps;
@@ -133,7 +137,9 @@ test('inserting a breather saves it in the workout and offers to skip it', async
     renderer!.root.findByProps({accessibilityLabel: 'Breathe'}).props.onPress();
     await Promise.resolve();
   });
-  expect(renderer!.root.findAllByProps({accessibilityLabel: 'Skip breather'}).length).toBeGreaterThan(0);
+  expect(
+    renderer!.root.findAllByProps({accessibilityLabel: 'Skip breather'}).length,
+  ).toBeGreaterThan(0);
   const last = moveStorageMock.setString.mock.calls.filter(([key]) => key === 'workouts-v2').pop();
   expect(JSON.parse(last![1])[0].steps).toHaveLength(3);
 });

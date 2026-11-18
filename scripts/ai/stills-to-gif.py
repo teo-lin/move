@@ -18,12 +18,13 @@ SIZE = (640, 360)
 MARGIN = 0.06  # fraction of the crop kept as white space around the person
 
 
-def load(path: Path, white_threshold: int) -> Image.Image:
+def load(path: Path, white_threshold: int, keep_grey: bool = False) -> Image.Image:
     img = Image.open(path).convert("RGB")
     px = np.asarray(img).astype(np.int16)
     near_white = (px >= white_threshold).all(axis=2)
     # Faint neutral greys (thin borders AI tools add) also become white.
-    near_white |= (px.min(axis=2) >= 200) & ((px.max(axis=2) - px.min(axis=2)) <= 12)
+    if not keep_grey:
+        near_white |= (px.min(axis=2) >= 200) & ((px.max(axis=2) - px.min(axis=2)) <= 12)
     px[near_white] = 255  # flatten off-white studio backgrounds
     return Image.fromarray(px.astype(np.uint8))
 
@@ -47,13 +48,15 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--ms", type=int, default=670, help="time per pose (bundled GIFs: 670 ms)")
     parser.add_argument("--white", type=int, default=238, help="pixels this bright on all channels become white")
+    parser.add_argument("--keep-grey", action="store_true", help="keep light-grey props such as a wall")
+    parser.add_argument("--dark", type=int, default=200, help="pixels darker than this count as content when cropping")
     args = parser.parse_args()
 
-    frames = [load(p, args.white) for p in args.images]
+    frames = [load(p, args.white, args.keep_grey) for p in args.images]
     # Same size for all frames (resize to the first one's size if a tool returned a different size).
     frames = [f if f.size == frames[0].size else f.resize(frames[0].size, Image.LANCZOS) for f in frames]
 
-    boxes = [content_box(f, args.white) for f in frames]
+    boxes = [content_box(f, args.white, args.dark) for f in frames]
     x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
     x1, y1 = max(b[2] for b in boxes), max(b[3] for b in boxes)
     # Grow the union box to 16:9 with a margin, centred on the content.

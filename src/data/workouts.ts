@@ -1,3 +1,5 @@
+import {importedWorkouts} from './importedWorkouts';
+
 export type Workout = {
   id: string;
   name: string;
@@ -23,6 +25,35 @@ export const BREATHER_SECONDS = 4;
 
 /** v2: only edited workouts are stored, so updated bundled defaults take effect. */
 export const workoutsKey = 'workouts-v2';
+
+/** The order of the workout list (ids), changed by dragging cards. */
+export const workoutOrderKey = 'workout-order';
+
+/** Ids of built-in workouts the user deleted; they stay hidden after a restart. */
+export const deletedWorkoutsKey = 'workouts-deleted';
+
+export function parseWorkoutOrder(raw: string | null): string[] {
+  try {
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(id => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export const parseIdList = parseWorkoutOrder;
+
+/** Sorts workouts by a saved id order; workouts missing from it keep their relative order, last. */
+export function applyWorkoutOrder<T extends {id: string}>(list: T[], order: string[]): T[] {
+  const rank = (id: string) => {
+    const index = order.indexOf(id);
+    return index === -1 ? order.length : index;
+  };
+  return list
+    .map((item, position) => ({item, position}))
+    .sort((a, b) => rank(a.item.id) - rank(b.item.id) || a.position - b.position)
+    .map(entry => entry.item);
+}
 
 export function breatherStep(seconds: number = BREATHER_SECONDS): WorkoutStep {
   return {exerciseId: 0, repetitions: 1, secondsPerRep: seconds, breather: true};
@@ -132,6 +163,17 @@ export const workouts: Workout[] = [
       step(115, 8, 3), // Squat
     ],
   },
+  // The two exercises made for this app: both are done standing, no equipment beyond a wall and a band.
+  {
+    id: 'wall-and-band',
+    name: 'Wall & band',
+    emoji: '🐒',
+    steps: [
+      step(121, 10, 3), // Wall push-up
+      step(122, 12, 3), // Band pull-apart
+    ],
+  },
+  ...importedWorkouts,
 ];
 
 export function workoutLabel(workout: Pick<Workout, 'name' | 'emoji'>): string {
@@ -150,7 +192,12 @@ export function mergeSavedWorkouts(raw: string | null, defaults: Workout[] = wor
     return defaults;
   }
   try {
-    const saved = JSON.parse(raw) as {id: string; name?: string; steps: WorkoutStep[]; restSeconds?: number}[];
+    const saved = JSON.parse(raw) as {
+      id: string;
+      name?: string;
+      steps: WorkoutStep[];
+      restSeconds?: number;
+    }[];
     if (!Array.isArray(saved)) {
       return defaults;
     }
@@ -176,7 +223,9 @@ export function mergeSavedWorkouts(raw: string | null, defaults: Workout[] = wor
         return workout;
       }
       const steps =
-        Array.isArray(match.steps) && match.steps.every(isWorkoutStep) ? match.steps : workout.steps;
+        Array.isArray(match.steps) && match.steps.every(isWorkoutStep)
+          ? match.steps
+          : workout.steps;
       const restSeconds =
         typeof match.restSeconds === 'number' && match.restSeconds >= 0
           ? match.restSeconds
@@ -220,7 +269,12 @@ function isWorkoutStep(value: unknown): value is WorkoutStep {
   );
 }
 
-function step(exerciseId: number, repetitions: number, secondsPerRep: number, twoSides = false): WorkoutStep {
+function step(
+  exerciseId: number,
+  repetitions: number,
+  secondsPerRep: number,
+  twoSides = false,
+): WorkoutStep {
   return {exerciseId, repetitions, secondsPerRep, twoSides};
 }
 

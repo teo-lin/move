@@ -13,10 +13,12 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 
+import {descriptions} from './src/data/descriptions';
 import {Exercise, exercises} from './src/data/exercises';
 import {
   CustomExercise,
@@ -34,6 +36,11 @@ import {
   workoutLabel,
   workouts as starterWorkouts,
   workoutsKey,
+  workoutOrderKey,
+  deletedWorkoutsKey,
+  parseIdList,
+  parseWorkoutOrder,
+  applyWorkoutOrder,
   Workout,
   WorkoutStep,
 } from './src/data/workouts';
@@ -54,6 +61,8 @@ import {MoveStorage, SpeechSettings} from './src/native/MoveStorage';
 import {Icon, IconName} from './src/ui/Icon';
 import {Calendar} from './src/ui/Calendar';
 import {Dropdown} from './src/ui/Dropdown';
+import {SwipeRow} from './src/ui/SwipeRow';
+import {useDragReorder} from './src/ui/useDragReorder';
 import {CatalogGrid} from './src/ui/CatalogGrid';
 import {GlowTile} from './src/ui/GlowTile';
 import {
@@ -68,7 +77,15 @@ import {
 type Screen = 'workouts' | 'catalog' | 'history' | 'stats' | 'settings';
 type Phase = 'announce' | 'countdown' | 'work' | 'change-side' | 'finishing' | 'rest';
 
+/** Space between the rows of the workout editor (must match the container's `gap`). */
+const STEP_GAP = 12;
+
 export default function App(): React.JSX.Element {
+  // Editor rows: the exercise animation gets 55% of the row at its true 16:9 shape (640x360).
+  // Row = screen - 2x18 padding - card border (2) - card padding (12) - gap (8).
+  const {width: screenWidth} = useWindowDimensions();
+  const stepImageWidth = Math.round((screenWidth - 36 - 2 - 12 - 8) * 0.55);
+  const stepImageSize = {width: stepImageWidth, height: Math.round((stepImageWidth * 9) / 16)};
   const [screen, setScreen] = useState<Screen>('workouts');
   const [history, setHistory] = useState<SessionEntry[]>([]);
   const [workouts, setWorkouts] = useState<Workout[]>(starterWorkouts);
@@ -109,6 +126,26 @@ export default function App(): React.JSX.Element {
   });
 
   const selectedWorkout = workouts.find(workout => workout.id === selectedWorkoutId) ?? workouts[0];
+  const [openSwipe, setOpenSwipe] = useState<string | null>(null);
+  const [deletedWorkoutIds, setDeletedWorkoutIds] = useState<string[]>([]);
+  const [undoSteps, setUndoSteps] = useState<
+    {workoutId: string; index: number; step: WorkoutStep}[]
+  >([]);
+  const [undoSessions, setUndoSessions] = useState<SessionEntry[]>([]);
+  const [undoWorkouts, setUndoWorkouts] = useState<
+    {workout: Workout; index: number; hidden: boolean}[]
+  >([]);
+  const workoutDrag = useDragReorder({
+    count: workouts.length,
+    gap: STEP_GAP,
+    onReorder: reorderWorkout,
+    captureTouches: false, // the tile is one touch area, the edit button inside keeps its own
+  });
+  const reorder = useDragReorder({
+    count: selectedWorkout?.steps.length ?? 0,
+    gap: STEP_GAP,
+    onReorder: reorderStep,
+  });
   const activeStep = activeWorkout?.steps[activeIndex] ?? null;
   const activeExercise = activeStep ? exerciseMap.get(activeStep.exerciseId) ?? null : null;
   useEffect(() => {
@@ -156,16 +193,44 @@ export default function App(): React.JSX.Element {
     MoveStorage.getString(cardBackgroundsKey).then(raw =>
       setCardBackgrounds(parseCardBackgrounds(raw)),
     );
-    MoveStorage.getString(workoutsKey)
-      .then(raw => setWorkouts(mergeSavedWorkouts(raw, starterWorkouts)))
+    Promise.all([
+      MoveStorage.getString(workoutsKey),
+      MoveStorage.getString(workoutOrderKey),
+      MoveStorage.getString(deletedWorkoutsKey),
+    ])
+      .then(([raw, order, deleted]) => {
+        const hidden = parseIdList(deleted);
+        setDeletedWorkoutIds(hidden);
+        setWorkouts(
+          applyWorkoutOrder(
+            mergeSavedWorkouts(raw, starterWorkouts),
+            parseWorkoutOrder(order),
+          ).filter(workout => !hidden.includes(workout.id)),
+        );
+      })
       .finally(() => setSettingsLoaded(true));
   }, []);
 
   useEffect(() => {
     if (settingsLoaded) {
       fire(MoveStorage.setString(workoutsKey, serializeWorkoutSettings(workouts)));
+      fire(MoveStorage.setString(workoutOrderKey, JSON.stringify(workouts.map(w => w.id))));
     }
   }, [workouts, settingsLoaded]);
+
+  useEffect(() => {
+    if (settingsLoaded) {
+      fire(MoveStorage.setString(deletedWorkoutsKey, JSON.stringify(deletedWorkoutIds)));
+    }
+  }, [deletedWorkoutIds, settingsLoaded]);
+
+  // The editor's undo list belongs to the workout that is open; swipes close when you move on.
+  useEffect(() => {
+    if (!editing) {
+      setUndoSteps([]);
+    }
+    setOpenSwipe(null);
+  }, [editing, selectedWorkoutId, screen]);
 
   useEffect(() => {
     fire(MoveStorage.setKeepAwake(activeWorkout !== null));
@@ -579,6 +644,86 @@ export default function App(): React.JSX.Element {
     );
   }
 
+  function deleteStep(index: number) {
+    const step = selectedWorkout?.steps[index];
+    if (!step) {
+      return;
+    }
+    setUndoSteps(list => [...list, {workoutId: selectedWorkout.id, index, step}]);
+    setOpenSwipe(null);
+    removeStep(index);
+  }
+
+  function undoStep() {
+    const last = undoSteps[undoSteps.length - 1];
+    if (!last) {
+      return;
+    }
+    setUndoSteps(list => list.slice(0, -1));
+    setWorkouts(list =>
+      list.map(workout => {
+        if (workout.id !== last.workoutId) {
+          return workout;
+        }
+        const steps = [...workout.steps];
+        steps.splice(Math.min(last.index, steps.length), 0, last.step);
+        return {...workout, steps};
+      }),
+    );
+  }
+
+  function deleteSession(entry: SessionEntry) {
+    setUndoSessions(list => [...list, entry]);
+    setOpenSwipe(null);
+    saveHistory(history.filter(item => item.id !== entry.id)).catch(error =>
+      Alert.alert('Could not delete', String(error)),
+    );
+  }
+
+  function undoSession() {
+    const last = undoSessions[undoSessions.length - 1];
+    if (!last) {
+      return;
+    }
+    setUndoSessions(list => list.slice(0, -1));
+    saveHistory([...history, last]).catch(error => Alert.alert('Could not restore', String(error)));
+  }
+
+  /** Built-in workouts are remembered as hidden so they stay deleted after a restart. */
+  function deleteWorkout(workout: Workout) {
+    const index = workouts.findIndex(item => item.id === workout.id);
+    const hidden = !workout.custom;
+    setUndoWorkouts(list => [...list, {workout, index, hidden}]);
+    if (hidden) {
+      setDeletedWorkoutIds(ids => (ids.includes(workout.id) ? ids : [...ids, workout.id]));
+    }
+    setOpenSwipe(null);
+    setWorkouts(list => list.filter(item => item.id !== workout.id));
+  }
+
+  function undoWorkout() {
+    const last = undoWorkouts[undoWorkouts.length - 1];
+    if (!last) {
+      return;
+    }
+    setUndoWorkouts(list => list.slice(0, -1));
+    setWorkouts(list => {
+      const next = [...list];
+      next.splice(Math.min(last.index, next.length), 0, last.workout);
+      return next;
+    });
+    if (last.hidden) {
+      setDeletedWorkoutIds(ids => ids.filter(id => id !== last.workout.id));
+    }
+  }
+
+  function restoreDeletedWorkouts() {
+    const back = starterWorkouts.filter(workout => deletedWorkoutIds.includes(workout.id));
+    setWorkouts(list => [...list, ...back.filter(item => !list.some(w => w.id === item.id))]);
+    setDeletedWorkoutIds([]);
+    setUndoWorkouts([]);
+  }
+
   function removeStep(index: number) {
     updateSelectedWorkout(workout => ({
       ...workout,
@@ -586,37 +731,32 @@ export default function App(): React.JSX.Element {
     }));
   }
 
-  function moveStep(index: number, direction: -1 | 1) {
-    updateSelectedWorkout(workout => {
-      const nextIndex = index + direction;
-      if (nextIndex < 0 || nextIndex >= workout.steps.length) {
-        return workout;
-      }
-      const steps = [...workout.steps];
-      const [step] = steps.splice(index, 1);
-      steps.splice(nextIndex, 0, step);
-      return {...workout, steps};
+  function playWorkout(workout: Workout) {
+    setSelectedWorkoutId(workout.id);
+    startWorkout(workout);
+  }
+
+  function openWorkout(workout: Workout) {
+    setSelectedWorkoutId(workout.id);
+    setEditing(true);
+  }
+
+  function reorderWorkout(from: number, to: number) {
+    setWorkouts(list => {
+      const next = [...list];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
     });
   }
 
-  function confirmDeleteEntry(entry: SessionEntry) {
-    Alert.alert(
-      'Delete session?',
-      `${formatDisplayDate(entry.timestamp)} ${formatTime(entry.timestamp)} · ${entry.workout} · ${
-        entry.completed
-      } / ${entry.total}`,
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () =>
-            saveHistory(history.filter(item => item.id !== entry.id)).catch(error =>
-              Alert.alert('Could not delete', String(error)),
-            ),
-        },
-      ],
-    );
+  function reorderStep(from: number, to: number) {
+    updateSelectedWorkout(workout => {
+      const steps = [...workout.steps];
+      const [moved] = steps.splice(from, 1);
+      steps.splice(to, 0, moved);
+      return {...workout, steps};
+    });
   }
 
   function resetSelectedWorkout() {
@@ -653,6 +793,15 @@ export default function App(): React.JSX.Element {
       return {year: date.getFullYear(), month: date.getMonth()};
     });
   }
+
+  const undoAction =
+    screen === 'workouts' && editing && !picking && undoSteps.length > 0
+      ? {count: undoSteps.length, onPress: undoStep}
+      : screen === 'workouts' && !editing && !creatingExercise && undoWorkouts.length > 0
+      ? {count: undoWorkouts.length, onPress: undoWorkout}
+      : screen === 'history' && undoSessions.length > 0
+      ? {count: undoSessions.length, onPress: undoSession}
+      : undefined;
 
   if (activeWorkout && activeStep) {
     return (
@@ -764,7 +913,7 @@ export default function App(): React.JSX.Element {
   }
 
   return (
-    <Shell title="Move" screen={screen} setScreen={navigate}>
+    <Shell title="Move" screen={screen} setScreen={navigate} undo={undoAction}>
       {screen === 'workouts' && !editing && creatingExercise && (
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <SmallButton label="‹ Workouts" onPress={() => setCreatingExercise(false)} />
@@ -772,6 +921,7 @@ export default function App(): React.JSX.Element {
             <Text style={styles.cardTitle}>New exercise</Text>
             <TextInput
               style={styles.input}
+              placeholderTextColor="#8b97a3"
               placeholder="Exercise name"
               value={newExerciseName}
               onChangeText={setNewExerciseName}
@@ -787,7 +937,7 @@ export default function App(): React.JSX.Element {
       )}
 
       {screen === 'workouts' && !editing && !creatingExercise && (
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView {...workoutDrag.scrollViewProps} contentContainerStyle={styles.content}>
           <View style={styles.addRow}>
             <PastelButton
               label="Add Workout"
@@ -802,90 +952,99 @@ export default function App(): React.JSX.Element {
               onPress={() => setCreatingExercise(true)}
             />
           </View>
-          {workouts.map(workout => {
-            const label = workoutLabel(workout);
-            const done = history.filter(
-              entry => csvWorkoutLabel(entry.workout, workouts) === label,
-            );
-            const last = done.reduce((latest, entry) => Math.max(latest, entry.timestamp), 0);
-            return (
-              <Pressable
-                key={workout.id}
-                accessibilityRole="button"
-                accessibilityLabel={`Open ${label}`}
-                onPress={() => {
-                  setSelectedWorkoutId(workout.id);
-                  setEditing(true);
-                }}>
-                <Textured style={styles.workoutCard} background={backgroundFor(workout.id)}>
-                  <View style={styles.workoutInfo}>
-                    <Text
-                      style={styles.cardTitle}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.75}>
-                      {label}
-                    </Text>
-                    <Text style={styles.stepMeta} numberOfLines={1}>
-                      {exerciseCount(workout)} exercises · ~
-                      {Math.round(estimateSeconds(workout) / 60)} min ·{' '}
-                      {done.length === 0
-                        ? 'not done yet'
-                        : `${done.length}× · last ${formatDisplayDate(last).slice(0, 5)}`}
-                    </Text>
-                  </View>
-                  <View style={styles.workoutButtons}>
-                    <Pressable
-                      style={styles.workoutButton}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Start ${label}`}
-                      onPress={() => {
-                        setSelectedWorkoutId(workout.id);
-                        startWorkout(workout);
-                      }}>
-                      <Icon name="symbolPlay" size={20} color="#1f2d38" />
-                    </Pressable>
-                    <Pressable
-                      style={styles.workoutButton}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Edit ${label}`}
-                      onPress={() => {
-                        setSelectedWorkoutId(workout.id);
-                        setEditing(true);
-                      }}>
-                      <Icon name="symbolEdit" size={15} color="#1f2d38" />
-                    </Pressable>
-                  </View>
-                </Textured>
-              </Pressable>
-            );
-          })}
+          <View style={styles.stepList} {...workoutDrag.containerProps}>
+            {workouts.map((workout, index) => {
+              const rowProps = workoutDrag.getRowProps(index);
+              const label = workoutLabel(workout);
+              const done = history.filter(
+                entry => csvWorkoutLabel(entry.workout, workouts) === label,
+              );
+              const last = done.reduce((latest, entry) => Math.max(latest, entry.timestamp), 0);
+              return (
+                <Animated.View
+                  key={workout.id}
+                  style={rowProps.style}
+                  onLayout={rowProps.onLayout}
+                  {...workoutDrag.getHandleProps(index, () =>
+                    openSwipe === workout.id ? setOpenSwipe(null) : playWorkout(workout),
+                  )}>
+                  <SwipeRow
+                    open={openSwipe === workout.id}
+                    onOpenChange={isOpen => setOpenSwipe(isOpen ? workout.id : null)}
+                    onDelete={() => deleteWorkout(workout)}
+                    onEdit={() => openWorkout(workout)}
+                    radius={10}>
+                    <Textured style={styles.workoutCard} background={backgroundFor(workout.id)}>
+                      <View
+                        style={styles.workoutInfo}
+                        accessible
+                        accessibilityRole="button"
+                        accessibilityLabel={`Start ${label}`}
+                        accessibilityActions={[{name: 'activate', label: `Start ${label}`}]}
+                        onAccessibilityAction={() => playWorkout(workout)}>
+                        <Text
+                          style={styles.cardTitle}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.75}>
+                          {label}
+                        </Text>
+                        <Text style={styles.stepMeta} numberOfLines={1}>
+                          {exerciseCount(workout)} exercises · ~
+                          {Math.round(estimateSeconds(workout) / 60)} min ·{' '}
+                          {done.length === 0
+                            ? 'not done yet'
+                            : `${done.length}× · last ${formatDisplayDate(last).slice(0, 5)}`}
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={styles.editButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit ${label}`}
+                        onPress={() => openWorkout(workout)}>
+                        <Icon name="symbolEdit" size={30} color="#1f2d38" />
+                      </Pressable>
+                    </Textured>
+                    <View
+                      style={[styles.sideHandle, styles.workoutListHandle]}
+                      accessibilityLabel="Press and hold the tile to reorder"
+                      pointerEvents="none">
+                      <Icon name="symbolDragIndicator" size={14} color="#8b97a3" />
+                    </View>
+                  </SwipeRow>
+                </Animated.View>
+              );
+            })}
+          </View>
         </ScrollView>
       )}
 
       {screen === 'workouts' && editing && picking && (
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <SmallButton label="‹ Back to workout" onPress={() => setPicking(false)} />
-          <TextInput
-            style={styles.input}
-            placeholder="Search exercises"
-            value={pickerFilter}
-            onChangeText={setPickerFilter}
-          />
-          {allExercises
-            .filter(item => item.name.toLowerCase().includes(pickerFilter.trim().toLowerCase()))
-            .map(item => (
-              <ExerciseRow
-                exercise={item}
-                key={item.id}
-                onPress={() => addExerciseToWorkout(item.id)}
+        <CatalogGrid
+          exercises={allExercises.filter(item =>
+            item.name.toLowerCase().includes(pickerFilter.trim().toLowerCase()),
+          )}
+          onPress={item => addExerciseToWorkout(item.id)}
+          header={
+            <View style={styles.pickerHeader}>
+              <SmallButton label="‹ Back to workout" onPress={() => setPicking(false)} />
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#8b97a3"
+                placeholder="Search exercises"
+                value={pickerFilter}
+                onChangeText={setPickerFilter}
               />
-            ))}
-        </ScrollView>
+            </View>
+          }
+        />
       )}
 
       {screen === 'workouts' && editing && !picking && selectedWorkout && (
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          {...reorder.scrollViewProps}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled">
           <SmallButton label="‹ Workouts" onPress={() => setEditing(false)} />
           <View style={styles.card}>
             {selectedWorkout.custom ? (
@@ -934,113 +1093,127 @@ export default function App(): React.JSX.Element {
             )}
           </View>
 
-          {selectedWorkout.steps.map((step, index) => {
-            if (step.breather) {
-              return (
-                <View style={styles.breatherCard} key={`breather-${index}`}>
-                  <Text style={styles.bodyText}>≈ Breather · {step.secondsPerRep}s</Text>
-                  <View style={styles.editGrid}>
-                    <View style={styles.editRow}>
-                      <ArrowButton direction="up" onPress={() => moveStep(index, -1)} />
-                      <GridButton
-                        label="+ sec"
-                        onPress={() =>
-                          updateStep(index, {
-                            secondsPerRep: step.secondsPerRep + 1,
-                          })
-                        }
-                      />
-                      <GridButton label="Remove" onPress={() => removeStep(index)} />
+          <View style={styles.stepList} {...reorder.containerProps}>
+            {selectedWorkout.steps.map((step, index) => {
+              const rowProps = reorder.getRowProps(index);
+              if (step.breather) {
+                return (
+                  <Animated.View
+                    style={[styles.breatherCard, rowProps.style]}
+                    onLayout={rowProps.onLayout}
+                    key={`breather-${index}`}>
+                    <View
+                      style={styles.breatherHandle}
+                      accessibilityLabel="Drag to reorder (press and hold)"
+                      {...reorder.getHandleProps(index)}>
+                      <Icon name="symbolDragIndicator" size={18} color="#9aa4ad" />
                     </View>
-                    <View style={styles.editRow}>
-                      <ArrowButton direction="down" onPress={() => moveStep(index, 1)} />
-                      <GridButton
-                        label="- sec"
-                        onPress={() =>
-                          updateStep(index, {
-                            secondsPerRep: Math.max(1, step.secondsPerRep - 1),
-                          })
-                        }
-                      />
-                      <View style={styles.gridSpacer} />
-                    </View>
-                  </View>
-                </View>
-              );
-            }
-            const exercise = exerciseMap.get(step.exerciseId);
-            const number = selectedWorkout.steps
-              .slice(0, index + 1)
-              .filter(item => !item.breather).length;
-            return (
-              <View style={styles.stepCard} key={`${step.exerciseId}-${index}`}>
-                {exercise && (
-                  <Image source={exercise.asset} style={styles.stepThumb} resizeMode="contain" />
-                )}
-                <View style={styles.stepMain}>
-                  <View style={styles.stepTitleRow}>
-                    <Text style={styles.stepName} numberOfLines={1}>
-                      {number}. {exercise ? exercise.name : 'Removed exercise'}
+                    <Text style={styles.breatherLabel} numberOfLines={1}>
+                      ≈ Breather {step.secondsPerRep}s
                     </Text>
-                    <Pressable
-                      style={styles.removeButton}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Remove ${exercise?.name ?? 'exercise'}`}
-                      onPress={() => removeStep(index)}>
-                      <Icon name="symbolClose" size={18} color="#697782" />
-                    </Pressable>
-                  </View>
-                  <Text style={styles.stepMeta}>
-                    {step.twoSides
-                      ? `${step.repetitions / 2} per side`
-                      : `${step.repetitions} reps`}{' '}
-                    · {step.secondsPerRep}s each
-                  </Text>
-                  <View style={styles.editGrid}>
-                    <View style={styles.editRow}>
-                      <ArrowButton direction="up" onPress={() => moveStep(index, -1)} />
-                      <GridButton
-                        label="+ rep"
-                        onPress={() =>
-                          updateStep(index, {
-                            repetitions: step.repetitions + (step.twoSides ? 2 : 1),
-                          })
-                        }
-                      />
-                      <GridButton
-                        label="+ sec"
-                        onPress={() =>
-                          updateStep(index, {
-                            secondsPerRep: step.secondsPerRep + 1,
-                          })
-                        }
-                      />
+                    <GridButton
+                      label="- sec"
+                      onPress={() =>
+                        updateStep(index, {secondsPerRep: Math.max(1, step.secondsPerRep - 1)})
+                      }
+                    />
+                    <GridButton
+                      label="+ sec"
+                      onPress={() => updateStep(index, {secondsPerRep: step.secondsPerRep + 1})}
+                    />
+                    <GridButton label="Remove" onPress={() => deleteStep(index)} />
+                  </Animated.View>
+                );
+              }
+              const exercise = exerciseMap.get(step.exerciseId);
+              const number = selectedWorkout.steps
+                .slice(0, index + 1)
+                .filter(item => !item.breather).length;
+              return (
+                <Animated.View
+                  style={rowProps.style}
+                  onLayout={rowProps.onLayout}
+                  key={`${step.exerciseId}-${index}`}>
+                  <SwipeRow
+                    open={openSwipe === `${selectedWorkout.id}:${index}`}
+                    onOpenChange={isOpen =>
+                      setOpenSwipe(isOpen ? `${selectedWorkout.id}:${index}` : null)
+                    }
+                    onDelete={() => deleteStep(index)}>
+                    <View style={styles.stepCard}>
+                      <View
+                        style={styles.sideHandle}
+                        accessibilityLabel="Drag to reorder (press and hold)"
+                        {...reorder.getHandleProps(index)}>
+                        <Icon name="symbolDragIndicator" size={14} color="#8b97a3" />
+                      </View>
+                      {exercise && (
+                        <Image
+                          source={exercise.asset}
+                          style={[styles.stepThumb, stepImageSize]}
+                          resizeMode="contain"
+                        />
+                      )}
+                      <View style={styles.stepMain}>
+                        <View style={styles.stepTitleRow}>
+                          <Text style={styles.stepName} numberOfLines={2}>
+                            {number}. {exercise ? exercise.name : 'Removed exercise'}
+                          </Text>
+                        </View>
+                        <Text style={styles.stepMeta}>
+                          {step.twoSides
+                            ? `${step.repetitions / 2} per side`
+                            : `${step.repetitions} reps`}{' '}
+                          · {step.secondsPerRep}s each
+                        </Text>
+                        <View style={styles.editGrid}>
+                          <View style={styles.editColumns}>
+                            <View style={styles.editRow}>
+                              <GridButton
+                                label="+ rep"
+                                onPress={() =>
+                                  updateStep(index, {
+                                    repetitions: step.repetitions + (step.twoSides ? 2 : 1),
+                                  })
+                                }
+                              />
+                              <GridButton
+                                label="+ sec"
+                                onPress={() =>
+                                  updateStep(index, {
+                                    secondsPerRep: step.secondsPerRep + 1,
+                                  })
+                                }
+                              />
+                            </View>
+                            <View style={styles.editRow}>
+                              <GridButton
+                                label="- rep"
+                                onPress={() => {
+                                  const unit = step.twoSides ? 2 : 1;
+                                  updateStep(index, {
+                                    repetitions: Math.max(unit, step.repetitions - unit),
+                                  });
+                                }}
+                              />
+                              <GridButton
+                                label="- sec"
+                                onPress={() =>
+                                  updateStep(index, {
+                                    secondsPerRep: Math.max(1, step.secondsPerRep - 1),
+                                  })
+                                }
+                              />
+                            </View>
+                          </View>
+                        </View>
+                      </View>
                     </View>
-                    <View style={styles.editRow}>
-                      <ArrowButton direction="down" onPress={() => moveStep(index, 1)} />
-                      <GridButton
-                        label="- rep"
-                        onPress={() => {
-                          const unit = step.twoSides ? 2 : 1;
-                          updateStep(index, {
-                            repetitions: Math.max(unit, step.repetitions - unit),
-                          });
-                        }}
-                      />
-                      <GridButton
-                        label="- sec"
-                        onPress={() =>
-                          updateStep(index, {
-                            secondsPerRep: Math.max(1, step.secondsPerRep - 1),
-                          })
-                        }
-                      />
-                    </View>
-                  </View>
-                </View>
-              </View>
-            );
-          })}
+                  </SwipeRow>
+                </Animated.View>
+              );
+            })}
+          </View>
           <Pressable
             style={styles.addButton}
             accessibilityRole="button"
@@ -1056,6 +1229,12 @@ export default function App(): React.JSX.Element {
         <ScrollView contentContainerStyle={styles.content}>
           <SmallButton label="‹ All exercises" onPress={() => setDetailExerciseId(null)} />
           <ExercisePreview exercise={detailExercise} large />
+          {descriptions[detailExercise.id] ? (
+            <View style={styles.descriptionCard}>
+              <Text style={styles.descriptionTitle}>How to</Text>
+              <Text style={styles.descriptionText}>{descriptions[detailExercise.id]}</Text>
+            </View>
+          ) : null}
           <Text style={styles.meta}>
             Used in:{' '}
             {workouts
@@ -1067,12 +1246,10 @@ export default function App(): React.JSX.Element {
       )}
 
       {screen === 'catalog' && !detailExercise && (
-        <ScrollView contentContainerStyle={styles.content}>
-          <CatalogGrid
-            exercises={allExercises}
-            onPress={exercise => setDetailExerciseId(exercise.id)}
-          />
-        </ScrollView>
+        <CatalogGrid
+          exercises={allExercises}
+          onPress={exercise => setDetailExerciseId(exercise.id)}
+        />
       )}
 
       {screen === 'history' && (
@@ -1084,7 +1261,7 @@ export default function App(): React.JSX.Element {
             onShift={shiftCalendar}
           />
           {history.length > 0 && (
-            <Text style={styles.meta}>Long-press a session to delete it.</Text>
+            <Text style={styles.meta}>Swipe a session left twice to delete it.</Text>
           )}
           {history.length === 0 ? (
             <Text style={styles.empty}>No completed sessions yet.</Text>
@@ -1094,11 +1271,12 @@ export default function App(): React.JSX.Element {
                 <Text style={styles.dayLabel}>{group.label}</Text>
                 {group.entries.map(entry => {
                   return (
-                    <Pressable
+                    <SwipeRow
                       key={entry.id}
-                      onLongPress={() => confirmDeleteEntry(entry)}
-                      accessibilityRole="button"
-                      accessibilityHint="Long press to delete this session">
+                      open={openSwipe === entry.id}
+                      onOpenChange={isOpen => setOpenSwipe(isOpen ? entry.id : null)}
+                      onDelete={() => deleteSession(entry)}
+                      radius={10}>
                       <Textured
                         style={styles.sessionCard}
                         background={sessionBackgrounds.get(entry.id)}>
@@ -1115,7 +1293,7 @@ export default function App(): React.JSX.Element {
                           {formatDuration(entry.durationSeconds)}
                         </Text>
                       </Textured>
-                    </Pressable>
+                    </SwipeRow>
                   );
                 })}
               </View>
@@ -1127,6 +1305,21 @@ export default function App(): React.JSX.Element {
       {screen === 'settings' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.cardTitle}>Settings</Text>
+          {deletedWorkoutIds.length > 0 ? (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Deleted workouts</Text>
+              <Text style={styles.meta}>
+                {deletedWorkoutIds.length} built-in workout
+                {deletedWorkoutIds.length === 1 ? ' is' : 's are'} hidden.
+              </Text>
+              <PastelButton
+                label="Restore"
+                icon="symbolUndo"
+                color={pastels.peach}
+                onPress={restoreDeletedWorkouts}
+              />
+            </View>
+          ) : null}
           <VoiceSettings />
         </ScrollView>
       )}
@@ -1171,11 +1364,13 @@ function Shell({
   title,
   screen,
   setScreen,
+  undo,
   children,
 }: {
   title: string;
   screen: Screen;
   setScreen: (screen: Screen) => void;
+  undo?: {count: number; onPress: () => void};
   children: React.ReactNode;
 }) {
   return (
@@ -1186,6 +1381,16 @@ function Shell({
           <Text style={styles.title} numberOfLines={1}>
             {title}
           </Text>
+          {undo ? (
+            <Pressable
+              style={styles.undoButton}
+              accessibilityRole="button"
+              accessibilityLabel="Undo delete"
+              onPress={undo.onPress}>
+              <Icon name="symbolUndo" size={20} color="#1f2d38" />
+              <Text style={styles.undoText}>Undo{undo.count > 1 ? ` (${undo.count})` : ''}</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             style={styles.settingsButton}
             accessibilityRole="button"
@@ -1505,21 +1710,6 @@ function Tab({label, active, onPress}: {label: string; active: boolean; onPress:
   );
 }
 
-function ExerciseRow({exercise, onPress}: {exercise: Exercise; onPress: () => void}) {
-  return (
-    <Pressable
-      style={styles.exerciseRow}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={exercise.name}>
-      <Image source={exercise.asset} style={styles.thumb} resizeMode="contain" />
-      <View style={styles.exerciseText}>
-        <Text style={styles.exerciseName}>{exercise.name}</Text>
-      </View>
-    </Pressable>
-  );
-}
-
 /** `fill`: grow/shrink with the runner's free space; `large`: fixed tall image (scroll views). */
 function ExercisePreview({
   exercise,
@@ -1530,13 +1720,14 @@ function ExercisePreview({
   large?: boolean;
   fill?: boolean;
 }) {
+  // Explicit pixel size: the GIFs are 16:9 (640x360); screen padding is 18 on each side.
+  const {width} = useWindowDimensions();
+  const largeSize = {width: width - 36, height: Math.round(((width - 36) * 9) / 16)};
   return (
     <View style={fill ? styles.previewFill : styles.preview}>
       <Image
         source={exercise.asset}
-        style={
-          fill ? styles.previewImageFill : large ? styles.previewImageLarge : styles.previewImage
-        }
+        style={fill ? styles.previewImageFill : large ? largeSize : styles.previewImage}
         resizeMode="contain"
       />
       <Text style={styles.cardTitle}>{exercise.name}</Text>
@@ -1584,18 +1775,6 @@ function Action({label, onPress}: {label: string; onPress: () => void}) {
       style={styles.action}
       onPress={onPress}>
       <Text style={styles.actionText}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function ArrowButton({direction, onPress}: {direction: 'up' | 'down'; onPress: () => void}) {
-  return (
-    <Pressable
-      style={[styles.gridButton, styles.arrowButton]}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={direction === 'up' ? 'Move up' : 'Move down'}>
-      <Icon name={direction === 'up' ? 'arrowUp' : 'arrowDown'} size={17} color="#ffffff" />
     </Pressable>
   );
 }
@@ -1746,10 +1925,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  removeButton: {
-    marginLeft: 'auto',
-    padding: 4,
-  },
   workoutCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1762,20 +1937,6 @@ const styles = StyleSheet.create({
   workoutInfo: {
     flex: 1,
     gap: 2,
-  },
-  workoutButtons: {
-    gap: 3,
-    alignItems: 'flex-end',
-  },
-  workoutButton: {
-    width: 26,
-    height: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    borderWidth: 1,
-    borderColor: 'rgba(31,45,56,0.15)',
   },
   title: {
     flexShrink: 1,
@@ -1822,15 +1983,41 @@ const styles = StyleSheet.create({
     backgroundColor: '#fbfcfd',
   },
   breatherCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: '#8fb3d9',
     borderRadius: 8,
-    padding: 10,
-    gap: 8,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
     backgroundColor: '#f4f8fc',
   },
+  breatherLabel: {
+    flex: 1.4,
+    color: '#1f2d38',
+    fontFamily: 'sans-serif-condensed',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  undoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 36,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    backgroundColor: '#fde3d3',
+  },
+  undoText: {
+    fontFamily: 'sans-serif-condensed',
+    color: '#1f2d38',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   stepCard: {
+    backgroundColor: '#ffffff', // opaque: the bin under a swiped tile must not show through
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
@@ -1845,7 +2032,8 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   stepName: {
-    flexShrink: 1,
+    flex: 1,
+    lineHeight: 17,
     fontFamily: 'sans-serif-condensed',
     color: '#1f2d38',
     fontSize: 14,
@@ -1880,24 +2068,27 @@ const styles = StyleSheet.create({
     fontSize: 18,
     paddingTop: 18,
   },
-  exerciseRow: {
-    minHeight: 82,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#d9dee3',
-    borderRadius: 8,
-    padding: 10,
-    gap: 12,
-  },
-  thumb: {
-    width: 96,
-    height: 96,
-  },
   stepThumb: {
-    flex: 1, // half the card; the text and controls take the other half
-    aspectRatio: 2.1, // a bit flatter than the 16:9 GIFs (fitted inside, not cropped) to keep rows short
-    borderRadius: 8,
+    borderRadius: 8, // size comes from stepImageSize
+  },
+  descriptionCard: {
+    gap: 6,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: 'rgba(31,45,56,0.12)',
+    backgroundColor: '#fbfcfd',
+  },
+  descriptionTitle: {
+    fontFamily: 'sans-serif-condensed',
+    color: '#1f2d38',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  descriptionText: {
+    color: '#2f3d48',
+    fontSize: 15,
+    lineHeight: 22,
   },
   restSetting: {
     gap: 6,
@@ -1943,10 +2134,6 @@ const styles = StyleSheet.create({
     fontSize: 64,
     fontWeight: '700',
   },
-  exerciseText: {
-    flex: 1,
-    gap: 4,
-  },
   exerciseName: {
     fontFamily: 'sans-serif-condensed',
     color: '#1f2d38',
@@ -1962,10 +2149,6 @@ const styles = StyleSheet.create({
   previewImage: {
     width: '100%',
     height: 220,
-  },
-  previewImageLarge: {
-    width: '100%',
-    height: 420,
   },
   previewFill: {
     flex: 1,
@@ -2047,8 +2230,53 @@ const styles = StyleSheet.create({
   actionTextDisabled: {
     color: '#9aa4ad',
   },
+  pickerHeader: {
+    gap: 12,
+  },
+  stepList: {
+    gap: STEP_GAP,
+  },
   editGrid: {
+    flexDirection: 'row',
     gap: 3,
+  },
+  editColumns: {
+    flex: 1,
+    gap: 3,
+  },
+  sideHandle: {
+    position: 'absolute',
+    left: -7, // straddles the card's left border (the screen padding is 18)
+    top: '3%', // height follows the card's height, centred by equal insets
+    bottom: '3%',
+    zIndex: 2,
+    width: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#d9dee3',
+    backgroundColor: '#ffffff',
+  },
+  editButton: {
+    width: 52, // twice the old 26 dp buttons
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(31,45,56,0.15)',
+  },
+  workoutListHandle: {
+    top: '7.7%', // 10% shorter than the editor's handle (94% of the card -> ~85%)
+    bottom: '7.7%',
+  },
+  breatherHandle: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   editRow: {
     flexDirection: 'row',
@@ -2063,13 +2291,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#c8d8e8',
     backgroundColor: '#f7fbff',
-  },
-  arrowButton: {
-    borderColor: '#226fb8',
-    backgroundColor: '#226fb8',
-  },
-  gridSpacer: {
-    flex: 1,
   },
   smallControlRow: {
     flexDirection: 'row',
