@@ -1394,7 +1394,7 @@ export default function App(): React.JSX.Element {
                         background={sessionBackgrounds.get(entry.id)}>
                         <View style={styles.sessionMain}>
                           <Text style={styles.sessionTitle} numberOfLines={1}>
-                            {csvWorkoutLabel(entry.workout, workouts)}
+                            {groupedWorkoutLabel(entry.workout, workouts)}
                           </Text>
                           <Text style={styles.stepMeta}>
                             {formatTime(entry.timestamp)} ·{' '}
@@ -1447,7 +1447,7 @@ export default function App(): React.JSX.Element {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{t('Import sessions')}</Text>
             <Text style={styles.meta}>
-              {t('Adds sessions from import-sessions.csv (Back Exercises format) to History.')}
+              {t('Adds sessions from import-sessions.csv to History.')}
             </Text>
             <PastelButton
               label="Import"

@@ -46,13 +46,13 @@ test('weeks start on Monday', () => {
 
 test('CSV matches the back-exercises.csv baseline format, newest first', () => {
   const rows = [
-    entry('1', new Date(2026, 6, 25, 10), 'PeSpate: abs'),
-    entry('2', new Date(2026, 7, 1, 10), '🐈 PatruLabe: upper body', 704),
+    entry('1', new Date(2026, 6, 25, 10), 'Core: Abs'),
+    entry('2', new Date(2026, 7, 1, 10), '🐈 Strength: Upper body', 704),
   ];
   expect(toBackExercisesCsv(rows, name => csvWorkoutLabel(name))).toBe(
     '"Date","Workout","Completion","Duration"\n' +
-      '"2026.08.01","🐈 PatruLabe: upper body","16 / 16","11:44"\n' +
-      '"2026.07.25","🦦 PeSpate: abs","16 / 16","14:44"\n',
+      '"2026.08.01","🐈 Strength: Upper body","16 / 16","11:44"\n' +
+      '"2026.07.25","🦦 Core: Abs","16 / 16","14:44"\n',
   );
 });
 
@@ -321,8 +321,8 @@ test('imported names keep their emoji, are upgraded in place, and renamed workou
   expect(result.merged[0].workout).toBe('🦘 Picioare');
   expect(merge(result.merged, [incoming]).updated).toBe(0);
 
-  expect(groupedWorkoutLabel('🐈 PatruLabe: pect/lomb')).toBe('🐈 PatruLabe: upper body');
-  expect(groupedWorkoutLabel('Patru Labe (pect+lomb)')).toBe('🐈 PatruLabe: upper body');
-  expect(groupedWorkoutLabel('🐕 PeSpate: abs')).toBe('🦦 PeSpate: abs');
+  expect(groupedWorkoutLabel('🐈 PatruLabe: pect/lomb')).toBe('🐈 Strength: Upper body');
+  expect(groupedWorkoutLabel('Patru Labe (pect+lomb)')).toBe('🐈 Strength: Upper body');
+  expect(groupedWorkoutLabel('🐕 Core: Abs')).toBe('🦦 Core: Abs');
   expect(groupedWorkoutLabel('🧞 Spate', [])).toBe('🧞 Spate');
 });

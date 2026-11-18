@@ -69,7 +69,7 @@ export const workouts: Workout[] = [
   // 17.11.2026). Its "Repeats per side" exercises use perSide().
   {
     id: 'pespate-abs',
-    name: 'PeSpate: abs',
+    name: 'Core: Abs',
     emoji: '🦦',
     steps: [
       step(3, 12, 2), // Windshield Wipers
@@ -92,7 +92,7 @@ export const workouts: Workout[] = [
   },
   {
     id: 'patrulabe-upper-body',
-    name: 'PatruLabe: upper body',
+    name: 'Strength: Upper body',
     emoji: '🐈',
     steps: [
       step(53, 4, 10), // Rolls
@@ -115,7 +115,7 @@ export const workouts: Workout[] = [
   // body/sessions.md "Kineto session — Core-First A (L1)". "N/side" = N reps per side.
   {
     id: 'core-first-a',
-    name: 'Core-First A',
+    name: 'Core: First A',
     emoji: '🐢',
     steps: [
       step(47, 8, 4), // Cat 1
@@ -134,7 +134,7 @@ export const workouts: Workout[] = [
   // body/sessions.md "Kineto session — Core-First B (L2)".
   {
     id: 'core-first-b',
-    name: 'Core-First B',
+    name: 'Core: First B',
     emoji: '🦩',
     steps: [
       step(48, 8, 4), // Cat 2
@@ -155,7 +155,7 @@ export const workouts: Workout[] = [
   // app's own exercise media (121 Wall push-up).
   {
     id: 'office-micro',
-    name: 'Office: micro',
+    name: 'Micro-sessions: Office',
     emoji: '🐿️',
     steps: [
       step(116, 10, 2), // Arm rotations
@@ -167,7 +167,7 @@ export const workouts: Workout[] = [
   // The two exercises made for this app: both are done standing, no equipment beyond a wall and a band.
   {
     id: 'wall-and-band',
-    name: 'Wall & band',
+    name: 'Strength: Wall & band',
     emoji: '🐒',
     steps: [
       step(121, 10, 3), // Wall push-up
@@ -181,11 +181,29 @@ export function workoutLabel(workout: Pick<Workout, 'name' | 'emoji'>): string {
   return workout.emoji ? `${workout.emoji} ${workout.name}` : workout.name;
 }
 
-/** Older names of workouts that were renamed (matched without their emoji). */
+/**
+ * Older names of workouts that were renamed (matched without their emoji), so sessions recorded
+ * under an old name still group and display under the current one.
+ */
 const renamedWorkouts: Record<string, string> = {
-  'PatruLabe: pect/lomb': 'PatruLabe: upper body', // renamed on 2024.06.26
-  'Patru Labe (pect+lomb)': 'PatruLabe: upper body',
-  'Patru Labe': 'PatruLabe: upper body',
+  'PeSpate: abs': 'Core: Abs',
+  'PatruLabe: upper body': 'Strength: Upper body',
+  'Core-First A': 'Core: First A',
+  'Core-First B': 'Core: First B',
+  'Office: micro': 'Micro-sessions: Office',
+  'Wall & band': 'Strength: Wall & band',
+  'Healthy back': 'Routine: Healthy back',
+  'Strong back': 'Strength: Back',
+  'Strengthening the neck': 'Strength: Neck',
+  'Strengthening the chest': 'Strength: Chest',
+  'Strengthening the lower back': 'Strength: Lower back',
+  'Functional back': 'Mobility: Back',
+  'With persistent pain': 'Relief: Persistent pain',
+  'Morning exercises': 'Routine: Morning',
+  'Stretching the spine': 'Stretching: Spine',
+  'PatruLabe: pect/lomb': 'Strength: Upper body',
+  'Patru Labe (pect+lomb)': 'Strength: Upper body',
+  'Patru Labe': 'Strength: Upper body',
 };
 
 /**

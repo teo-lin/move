@@ -27,7 +27,7 @@ Workouts are guided and timed:
 
 ## Phase 2 Features
 
-- **Routines:** PeSpate: abs and PatruLabe: upper body (reps, seconds and per-side moves copied from the original Back Exercises app), Core-First A (L1), Core-First B (L2) from `body/sessions.md`, and Office: micro. "N/side" moves run N reps on the left, then the voice says "Right side" and they repeat on the right.
+- **Routines:** Core: Abs (was PeSpate: abs) and Strength: Upper body (was PatruLabe: upper body) (reps, seconds and per-side moves copied from the original Back Exercises app), Core: First A (L1), Core: First B (L2) from `body/sessions.md`, and Micro-sessions: Office. Workout titles follow "Type: Focus" (Core, Strength, Mobility, Stretching, Routine, Relief, Micro-sessions); sessions recorded under an old name still group under the new one. "N/side" moves run N reps on the left, then the voice says "Right side" and they repeat on the right.
 - **European calendar:** History shows a month calendar with weeks starting on Monday, sessions grouped by local day, and dates as `dd.MM.yyyy`. The CSV keeps the baseline's `yyyy.MM.dd`.
 - **Stats:** sessions this week (Monday–Sunday) and this month, totals, and per-workout counts, plus Export and Share for the CSV.
 - **Own exercise media:** `121 Wall push-up.gif` and `122 Band pull-apart.gif` are original two-pose animations made with an image AI from a catalog frame plus a stick-figure pose guide (`scripts/ai/`, see its README). `scripts/ai/stills-to-gif.py` turns 2–4 pose images into a catalog-style GIF. Run `npm run generate:exercises` after adding GIFs to `assets/exercises`.

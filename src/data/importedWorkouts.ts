@@ -5,10 +5,16 @@ import type {Workout, WorkoutStep} from './workouts';
  * Each step is [exerciseId, repetitions, secondsPerRep, perSide]; for per-side moves the
  * repetitions are per side. Timed holds are stored as repetitions of the hold length.
  */
-const programs: {id: string; name: string; steps: [number, number, number, boolean][]}[] = [
+const programs: {
+  id: string;
+  name: string;
+  emoji?: string;
+  steps: [number, number, number, boolean][];
+}[] = [
   {
     id: 'back-healthy-back',
-    name: 'Healthy back',
+    name: 'Routine: Healthy back',
+    emoji: '🦌',
     steps: [
       [1, 2, 30, false], // Lumbar Flattening
       [12, 16, 1, false], // Ankle Pumps
@@ -33,7 +39,8 @@ const programs: {id: string; name: string; steps: [number, number, number, boole
   },
   {
     id: 'back-strong-back',
-    name: 'Strong back',
+    name: 'Strength: Back',
+    emoji: '🐻',
     steps: [
       [98, 8, 2, false], // Shoulder circles
       [99, 8, 2, false], // Sitting shoulder blade retraction
@@ -63,7 +70,8 @@ const programs: {id: string; name: string; steps: [number, number, number, boole
   },
   {
     id: 'back-strengthening-the-neck',
-    name: 'Strengthening the neck',
+    name: 'Strength: Neck',
+    emoji: '🦒',
     steps: [
       [95, 4, 4, true], // Neck rotation stretch
       [94, 4, 4, true], // Neck side strech
@@ -80,7 +88,8 @@ const programs: {id: string; name: string; steps: [number, number, number, boole
   },
   {
     id: 'back-strengthening-the-lower-back',
-    name: 'Strengthening the lower back',
+    name: 'Strength: Lower back',
+    emoji: '🐘',
     steps: [
       [12, 16, 1, false], // Ankle Pumps
       [3, 16, 4, false], // Windshield Wipers
@@ -102,7 +111,8 @@ const programs: {id: string; name: string; steps: [number, number, number, boole
   },
   {
     id: 'back-strengthening-the-chest',
-    name: 'Strengthening the chest',
+    name: 'Strength: Chest',
+    emoji: '🦁',
     steps: [
       [98, 8, 2, false], // Shoulder circles
       [97, 8, 2, false], // Shoulder lift
@@ -126,7 +136,8 @@ const programs: {id: string; name: string; steps: [number, number, number, boole
   },
   {
     id: 'back-functional-back',
-    name: 'Functional back',
+    name: 'Mobility: Back',
+    emoji: '🐬',
     steps: [
       [1, 2, 30, false], // Lumbar Flattening
       [12, 16, 1, false], // Ankle Pumps
@@ -159,7 +170,8 @@ const programs: {id: string; name: string; steps: [number, number, number, boole
   },
   {
     id: 'back-with-persistent-pain',
-    name: 'With persistent pain',
+    name: 'Relief: Persistent pain',
+    emoji: '🐑',
     steps: [
       [1, 2, 30, false], // Lumbar Flattening
       [12, 16, 1, false], // Ankle Pumps
@@ -182,7 +194,8 @@ const programs: {id: string; name: string; steps: [number, number, number, boole
   },
   {
     id: 'back-morning-exercises',
-    name: 'Morning exercises',
+    name: 'Routine: Morning',
+    emoji: '🐓',
     steps: [
       [94, 4, 4, true], // Neck side strech
       [93, 8, 8, false], // Neck forward stretch
@@ -204,7 +217,8 @@ const programs: {id: string; name: string; steps: [number, number, number, boole
   },
   {
     id: 'back-stretching-the-spine',
-    name: 'Stretching the spine',
+    name: 'Stretching: Spine',
+    emoji: '🐍',
     steps: [
       [95, 4, 4, true], // Neck rotation stretch
       [94, 4, 4, true], // Neck side strech
@@ -224,6 +238,7 @@ const programs: {id: string; name: string; steps: [number, number, number, boole
 export const importedWorkouts: Workout[] = programs.map(program => ({
   id: program.id,
   name: program.name,
+  emoji: program.emoji,
   steps: program.steps.map(
     ([exerciseId, repetitions, secondsPerRep, perSide]): WorkoutStep => ({
       exerciseId,

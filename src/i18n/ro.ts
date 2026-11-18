@@ -177,7 +177,7 @@ export const ro: Record<string, string> = {
   '{count} sessions added to History.': '{count} sesiuni adăugate în Istoric.',
   'Could not import': 'Nu am putut importa',
   'Import sessions': 'Importă sesiuni',
-  'Adds sessions from import-sessions.csv (Back Exercises format) to History.':
-    'Adaugă în Istoric sesiunile din import-sessions.csv (format Back Exercises).',
+  'Adds sessions from import-sessions.csv to History.':
+    'Adaugă în Istoric sesiunile din import-sessions.csv.',
   Import: 'Importă',
 };
