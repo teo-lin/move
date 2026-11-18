@@ -214,3 +214,34 @@ test('workout order: saved ids sort the list, unknown workouts keep their place 
   expect(parseWorkoutOrder('not json')).toEqual([]);
   expect(parseWorkoutOrder('["x",1,"y"]')).toEqual(['x', 'y']);
 });
+
+test('exercises from the health plan are complete, categorised and do not clash with the catalog', () => {
+  const {extraExercises, extraDescriptions, extraDefaults} = require('../src/data/extraExercises');
+  const {categories, groupByCategory} = require('../src/data/categories');
+  const {exercises} = require('../src/data/exercises');
+  const bundled = new Set(exercises.map((e: {id: number}) => e.id));
+  const keys = new Set(categories.map((c: {key: string}) => c.key));
+  const ids = new Set<number>();
+  for (const extra of extraExercises) {
+    expect(ids.has(extra.id)).toBe(false);
+    ids.add(extra.id);
+    expect(bundled.has(extra.id)).toBe(false);
+    expect(extra.id).toBeLessThan(1000);
+    expect(keys.has(extra.category)).toBe(true);
+    expect(extraDescriptions[extra.id].length).toBeGreaterThan(60);
+    const d = extraDefaults[extra.id];
+    expect(d.repetitions).toBeGreaterThan(0);
+    expect(d.secondsPerRep).toBeGreaterThan(0);
+    if (d.twoSides) {
+      expect(d.repetitions % 2).toBe(0);
+    }
+  }
+  expect(extraExercises.length).toBeGreaterThanOrEqual(30);
+  const groups = groupByCategory([...exercises, ...extraExercises]);
+  expect(groups.reduce((n: number, g: {items: unknown[]}) => n + g.items.length, 0)).toBe(
+    exercises.length + extraExercises.length,
+  );
+  expect(groups.map((g: {key: string}) => g.key)).toEqual(
+    expect.arrayContaining(['balance', 'warmup', 'strength', 'stretch']),
+  );
+});

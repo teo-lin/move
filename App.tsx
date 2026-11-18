@@ -19,6 +19,7 @@ import {
 import {SafeAreaView} from 'react-native-safe-area-context';
 
 import {descriptions} from './src/data/descriptions';
+import {extraDefaults, extraDescriptions, extraExercises} from './src/data/extraExercises';
 import {Exercise, exercises} from './src/data/exercises';
 import {
   CustomExercise,
@@ -61,7 +62,10 @@ import {MoveStorage, SpeechSettings} from './src/native/MoveStorage';
 import {Icon, IconName} from './src/ui/Icon';
 import {Calendar} from './src/ui/Calendar';
 import {Dropdown} from './src/ui/Dropdown';
-import {SwipeRow} from './src/ui/SwipeRow';
+import {Revealed, SwipeRow} from './src/ui/SwipeRow';
+import {CongratsView, pickReward} from './src/ui/Congrats';
+import {pickQuote, Quote} from './src/data/quotes';
+import {getLanguage, Language, languages, parseLanguage, setLanguage, t} from './src/i18n';
 import {useDragReorder} from './src/ui/useDragReorder';
 import {CatalogGrid} from './src/ui/CatalogGrid';
 import {GlowTile} from './src/ui/GlowTile';
@@ -113,7 +117,12 @@ export default function App(): React.JSX.Element {
   const [customExercises, setCustomExercises] = useState<CustomExercise[]>([]);
   const [cardBackgrounds, setCardBackgrounds] = useState<Record<string, number> | null>(null);
   const allExercises = useMemo(
-    () => [...exercises, ...customExercises.map(toExercise)],
+    () => [
+      ...exercises,
+      // plan exercises without an animation yet (a generated GIF with the same id replaces them)
+      ...extraExercises.filter(extra => !exercises.some(item => item.id === extra.id)),
+      ...customExercises.map(toExercise),
+    ],
     [customExercises],
   );
   const exerciseMap = useMemo(
@@ -126,8 +135,30 @@ export default function App(): React.JSX.Element {
   });
 
   const selectedWorkout = workouts.find(workout => workout.id === selectedWorkoutId) ?? workouts[0];
-  const [openSwipe, setOpenSwipe] = useState<string | null>(null);
+  const [openSwipe, setOpenSwipe] = useState<{id: string; side: Exclude<Revealed, null>} | null>(
+    null,
+  );
+  const revealedFor = (id: string): Revealed => (openSwipe?.id === id ? openSwipe.side : null);
+  const revealRow = (id: string) => (side: Revealed) => setOpenSwipe(side ? {id, side} : null);
   const [deletedWorkoutIds, setDeletedWorkoutIds] = useState<string[]>([]);
+  const [language, setLanguageState] = useState<Language>(getLanguage());
+  const [congrats, setCongrats] = useState<{
+    reward: number;
+    quote: Quote;
+    summary: string;
+  } | null>(null);
+  const chooseLanguage = (next: Language) => {
+    setLanguage(next);
+    setLanguageState(next);
+    fire(MoveStorage.setString('language', next));
+  };
+  // The swipe demo plays the first two times a screen is shown after the app is (re)opened.
+  const [hintPlays, setHintPlays] = useState<Record<string, number>>({});
+  const hintProps = (screenKey: string) => ({
+    hint: (hintPlays[screenKey] ?? 0) < 2,
+    onHinted: () =>
+      setHintPlays(current => ({...current, [screenKey]: (current[screenKey] ?? 0) + 1})),
+  });
   const [undoSteps, setUndoSteps] = useState<
     {workoutId: string; index: number; step: WorkoutStep}[]
   >([]);
@@ -187,6 +218,11 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     MoveStorage.getString(historyKey).then(raw => setHistory(parseHistory(raw)));
+    MoveStorage.getString('language').then(raw => {
+      const saved = parseLanguage(raw);
+      setLanguage(saved);
+      setLanguageState(saved);
+    });
     MoveStorage.getString(customExercisesKey).then(raw =>
       setCustomExercises(parseCustomExercises(raw)),
     );
@@ -574,6 +610,13 @@ export default function App(): React.JSX.Element {
       Alert.alert('Could not save workout', String(error));
     });
     setActiveWorkout(null);
+    if (entry.completed >= entry.total) {
+      setCongrats({
+        reward: pickReward(),
+        quote: pickQuote(),
+        summary: `${entry.workout} · ${formatDuration(entry.durationSeconds)}`,
+      });
+    }
     setScreen('history');
   }
 
@@ -622,7 +665,12 @@ export default function App(): React.JSX.Element {
   function addExerciseToWorkout(exerciseId: number) {
     updateSelectedWorkout(workout => ({
       ...workout,
-      steps: [...workout.steps, {exerciseId, repetitions: 10, secondsPerRep: 3, twoSides: false}],
+      steps: [
+        ...workout.steps,
+        extraDefaults[exerciseId]
+          ? {exerciseId, ...extraDefaults[exerciseId]}
+          : {exerciseId, repetitions: 10, secondsPerRep: 3, twoSides: false},
+      ],
     }));
     setPicking(false);
     setPickerFilter('');
@@ -805,8 +853,11 @@ export default function App(): React.JSX.Element {
 
   if (activeWorkout && activeStep) {
     return (
-      <Shell title={workoutLabel(activeWorkout)} screen={screen} setScreen={setScreen}>
+      <Shell screen={screen} setScreen={setScreen}>
         <View style={styles.runner}>
+          <Text style={styles.runnerTitle} numberOfLines={1}>
+            {workoutLabel(activeWorkout)}
+          </Text>
           <Text style={styles.meta}>
             {activeWorkout.steps.slice(0, activeIndex + 1).filter(item => !item.breather).length} /{' '}
             {exerciseCount(activeWorkout)} ·{' '}
@@ -912,8 +963,31 @@ export default function App(): React.JSX.Element {
     );
   }
 
+  if (congrats) {
+    return (
+      <Shell
+        screen={screen}
+        setScreen={next => {
+          setCongrats(null);
+          navigate(next);
+        }}>
+        <CongratsView
+          rewardIndex={congrats.reward}
+          quote={congrats.quote}
+          summary={congrats.summary}>
+          <PastelButton
+            label={t('Done')}
+            icon="symbolUndo"
+            color={pastels.mint}
+            onPress={() => setCongrats(null)}
+          />
+        </CongratsView>
+      </Shell>
+    );
+  }
+
   return (
-    <Shell title="Move" screen={screen} setScreen={navigate} undo={undoAction}>
+    <Shell screen={screen} setScreen={navigate} undo={undoAction}>
       {screen === 'workouts' && !editing && creatingExercise && (
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <SmallButton label="‹ Workouts" onPress={() => setCreatingExercise(false)} />
@@ -961,55 +1035,49 @@ export default function App(): React.JSX.Element {
               );
               const last = done.reduce((latest, entry) => Math.max(latest, entry.timestamp), 0);
               return (
-                <Animated.View
-                  key={workout.id}
-                  style={rowProps.style}
-                  onLayout={rowProps.onLayout}
-                  {...workoutDrag.getHandleProps(index, () =>
-                    openSwipe === workout.id ? setOpenSwipe(null) : playWorkout(workout),
-                  )}>
+                <Animated.View key={workout.id} style={rowProps.style} onLayout={rowProps.onLayout}>
                   <SwipeRow
-                    open={openSwipe === workout.id}
-                    onOpenChange={isOpen => setOpenSwipe(isOpen ? workout.id : null)}
+                    revealed={revealedFor(workout.id)}
+                    onReveal={revealRow(workout.id)}
                     onDelete={() => deleteWorkout(workout)}
                     onEdit={() => openWorkout(workout)}
+                    {...(index === 0 ? hintProps('workouts') : {})}
                     radius={10}>
-                    <Textured style={styles.workoutCard} background={backgroundFor(workout.id)}>
-                      <View
-                        style={styles.workoutInfo}
-                        accessible
-                        accessibilityRole="button"
-                        accessibilityLabel={`Start ${label}`}
-                        accessibilityActions={[{name: 'activate', label: `Start ${label}`}]}
-                        onAccessibilityAction={() => playWorkout(workout)}>
-                        <Text
-                          style={styles.cardTitle}
-                          numberOfLines={1}
-                          adjustsFontSizeToFit
-                          minimumFontScale={0.75}>
-                          {label}
-                        </Text>
-                        <Text style={styles.stepMeta} numberOfLines={1}>
-                          {exerciseCount(workout)} exercises · ~
-                          {Math.round(estimateSeconds(workout) / 60)} min ·{' '}
-                          {done.length === 0
-                            ? 'not done yet'
-                            : `${done.length}× · last ${formatDisplayDate(last).slice(0, 5)}`}
-                        </Text>
-                      </View>
-                      <Pressable
-                        style={styles.editButton}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Edit ${label}`}
-                        onPress={() => openWorkout(workout)}>
-                        <Icon name="symbolEdit" size={30} color="#1f2d38" />
-                      </Pressable>
-                    </Textured>
                     <View
-                      style={[styles.sideHandle, styles.workoutListHandle]}
-                      accessibilityLabel="Press and hold the tile to reorder"
-                      pointerEvents="none">
-                      <Icon name="symbolDragIndicator" size={14} color="#8b97a3" />
+                      {...workoutDrag.getHandleProps(index, () =>
+                        openSwipe?.id === workout.id ? setOpenSwipe(null) : playWorkout(workout),
+                      )}>
+                      <Textured style={styles.workoutCard} background={backgroundFor(workout.id)}>
+                        <View
+                          style={styles.workoutInfo}
+                          accessible
+                          accessibilityRole="button"
+                          accessibilityLabel={`Start ${label}`}
+                          accessibilityActions={[{name: 'activate', label: `Start ${label}`}]}
+                          onAccessibilityAction={() => playWorkout(workout)}>
+                          <Text
+                            style={styles.cardTitle}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.75}>
+                            {label}
+                          </Text>
+                          <Text style={styles.stepMeta} numberOfLines={1}>
+                            {exerciseCount(workout)}{' '}
+                            {exerciseCount(workout) === 1 ? 'exercise' : 'exercises'} · ~
+                            {Math.round(estimateSeconds(workout) / 60)} min ·{' '}
+                            {done.length === 0
+                              ? 'not done yet'
+                              : `${done.length}× · last ${formatDisplayDate(last).slice(0, 5)}`}
+                          </Text>
+                        </View>
+                      </Textured>
+                      <View
+                        style={[styles.sideHandle, styles.workoutListHandle]}
+                        accessibilityLabel="Press and hold the tile to reorder"
+                        pointerEvents="none">
+                        <Icon name="symbolDragIndicator" size={14} color="#8b97a3" />
+                      </View>
                     </View>
                   </SwipeRow>
                 </Animated.View>
@@ -1058,7 +1126,8 @@ export default function App(): React.JSX.Element {
               <Text style={styles.cardTitle}>{workoutLabel(selectedWorkout)}</Text>
             )}
             <Text style={styles.meta}>
-              {exerciseCount(selectedWorkout)} exercises · about{' '}
+              {exerciseCount(selectedWorkout)}{' '}
+              {exerciseCount(selectedWorkout) === 1 ? 'exercise' : 'exercises'} · about{' '}
               {Math.round(estimateSeconds(selectedWorkout) / 60)} min
             </Text>
             <View style={styles.restSetting}>
@@ -1135,10 +1204,8 @@ export default function App(): React.JSX.Element {
                   onLayout={rowProps.onLayout}
                   key={`${step.exerciseId}-${index}`}>
                   <SwipeRow
-                    open={openSwipe === `${selectedWorkout.id}:${index}`}
-                    onOpenChange={isOpen =>
-                      setOpenSwipe(isOpen ? `${selectedWorkout.id}:${index}` : null)
-                    }
+                    revealed={revealedFor(`${selectedWorkout.id}:${index}`)}
+                    onReveal={revealRow(`${selectedWorkout.id}:${index}`)}
                     onDelete={() => deleteStep(index)}>
                     <View style={styles.stepCard}>
                       <View
@@ -1229,10 +1296,12 @@ export default function App(): React.JSX.Element {
         <ScrollView contentContainerStyle={styles.content}>
           <SmallButton label="‹ All exercises" onPress={() => setDetailExerciseId(null)} />
           <ExercisePreview exercise={detailExercise} large />
-          {descriptions[detailExercise.id] ? (
+          {descriptions[detailExercise.id] ?? extraDescriptions[detailExercise.id] ? (
             <View style={styles.descriptionCard}>
               <Text style={styles.descriptionTitle}>How to</Text>
-              <Text style={styles.descriptionText}>{descriptions[detailExercise.id]}</Text>
+              <Text style={styles.descriptionText}>
+                {descriptions[detailExercise.id] ?? extraDescriptions[detailExercise.id]}
+              </Text>
             </View>
           ) : null}
           <Text style={styles.meta}>
@@ -1266,15 +1335,16 @@ export default function App(): React.JSX.Element {
           {history.length === 0 ? (
             <Text style={styles.empty}>No completed sessions yet.</Text>
           ) : (
-            groupByLocalDate(history).map(group => (
+            groupByLocalDate(history).map((group, groupIndex) => (
               <View style={styles.dayGroup} key={group.key}>
                 <Text style={styles.dayLabel}>{group.label}</Text>
-                {group.entries.map(entry => {
+                {group.entries.map((entry, entryIndex) => {
                   return (
                     <SwipeRow
                       key={entry.id}
-                      open={openSwipe === entry.id}
-                      onOpenChange={isOpen => setOpenSwipe(isOpen ? entry.id : null)}
+                      {...(groupIndex === 0 && entryIndex === 0 ? hintProps('history') : {})}
+                      revealed={revealedFor(entry.id)}
+                      onReveal={revealRow(entry.id)}
                       onDelete={() => deleteSession(entry)}
                       radius={10}>
                       <Textured
@@ -1305,6 +1375,14 @@ export default function App(): React.JSX.Element {
       {screen === 'settings' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.cardTitle}>Settings</Text>
+          <View style={styles.card}>
+            <Dropdown
+              label="Language"
+              value={language}
+              options={languages}
+              onChange={value => chooseLanguage(parseLanguage(value))}
+            />
+          </View>
           {deletedWorkoutIds.length > 0 ? (
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Deleted workouts</Text>
@@ -1361,13 +1439,11 @@ function fire(promise: Promise<unknown>) {
 }
 
 function Shell({
-  title,
   screen,
   setScreen,
   undo,
   children,
 }: {
-  title: string;
   screen: Screen;
   setScreen: (screen: Screen) => void;
   undo?: {count: number; onPress: () => void};
@@ -1377,44 +1453,50 @@ function Shell({
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       <View style={styles.header}>
-        <View style={styles.titleRow}>
-          <Text style={styles.title} numberOfLines={1}>
-            {title}
-          </Text>
-          {undo ? (
-            <Pressable
-              style={styles.undoButton}
-              accessibilityRole="button"
-              accessibilityLabel="Undo delete"
-              onPress={undo.onPress}>
-              <Icon name="symbolUndo" size={20} color="#1f2d38" />
-              <Text style={styles.undoText}>Undo{undo.count > 1 ? ` (${undo.count})` : ''}</Text>
-            </Pressable>
-          ) : null}
-          <Pressable
-            style={styles.settingsButton}
-            accessibilityRole="button"
-            accessibilityLabel="Settings"
-            onPress={() => setScreen('settings')}>
-            <Icon name="settings" size={28} color={screen === 'settings' ? '#126b46' : '#52606d'} />
-          </Pressable>
-        </View>
         <View style={styles.tabs}>
           <Tab
-            label="Workouts"
+            label={t('Workouts')}
             active={screen === 'workouts'}
             onPress={() => setScreen('workouts')}
           />
           <Tab
-            label="Exercises"
+            label={t('Exercises')}
             active={screen === 'catalog'}
             onPress={() => setScreen('catalog')}
           />
-          <Tab label="History" active={screen === 'history'} onPress={() => setScreen('history')} />
-          <Tab label="Stats" active={screen === 'stats'} onPress={() => setScreen('stats')} />
+          <Tab
+            label={t('History')}
+            active={screen === 'history'}
+            onPress={() => setScreen('history')}
+          />
+          <Tab label={t('Stats')} active={screen === 'stats'} onPress={() => setScreen('stats')} />
+          <Pressable
+            style={[styles.menuButton, screen === 'settings' && styles.tabActive]}
+            accessibilityRole="button"
+            accessibilityLabel={t('Settings')}
+            onPress={() => setScreen('settings')}>
+            <Icon
+              name="symbolMenu"
+              size={26}
+              color={screen === 'settings' ? '#126b46' : '#52606d'}
+            />
+          </Pressable>
         </View>
       </View>
       {children}
+      {undo ? (
+        <Pressable
+          style={styles.undoButton}
+          accessibilityRole="button"
+          accessibilityLabel="Undo delete"
+          onPress={undo.onPress}>
+          <Icon name="symbolUndo" size={20} color="#1f2d38" />
+          <Text style={styles.undoText}>
+            {t('Undo')}
+            {undo.count > 1 ? ` (${undo.count})` : ''}
+          </Text>
+        </Pressable>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1705,7 +1787,13 @@ function voiceLabel(voice: {name: string; locale: string}): string {
 function Tab({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
   return (
     <Pressable style={[styles.tab, active && styles.tabActive]} onPress={onPress}>
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+      <Text
+        style={[styles.tabText, active && styles.tabTextActive]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -1843,7 +1931,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 18,
-    paddingTop: 18,
+    paddingTop: 12,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#d9dee3',
@@ -1947,8 +2035,23 @@ const styles = StyleSheet.create({
   },
   tabs: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 14,
+    alignItems: 'center',
+    gap: 6,
+  },
+  menuButton: {
+    width: 44,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#d9dee3',
+  },
+  runnerTitle: {
+    fontFamily: 'sans-serif-condensed',
+    color: '#1f2d38',
+    fontSize: 26,
+    fontWeight: '700',
   },
   tab: {
     flex: 1,
@@ -1957,6 +2060,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#d9dee3',
     paddingVertical: 10,
+    paddingHorizontal: 2,
+    minWidth: 0,
   },
   tabActive: {
     borderColor: '#168f5c',
@@ -1964,7 +2069,7 @@ const styles = StyleSheet.create({
   },
   tabText: {
     color: '#52606d',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
   tabTextActive: {
@@ -2002,6 +2107,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   undoButton: {
+    position: 'absolute',
+    bottom: 22,
+    alignSelf: 'center',
+    elevation: 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
