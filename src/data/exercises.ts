@@ -133,6 +133,25 @@ const exercise124 = require('../../assets/exercises/124 Single-leg stance.gif');
 const exercise125 = require('../../assets/exercises/125 Heel-to-toe walking.gif');
 const exercise126 = require('../../assets/exercises/126 Romberg stance.gif');
 const exercise127 = require('../../assets/exercises/127 Leg swings.gif');
+const exercise128 = require('../../assets/exercises/128 Standing hip circles.gif');
+const exercise129 = require('../../assets/exercises/129 Seated thoracic rotation.gif');
+const exercise130 = require('../../assets/exercises/130 Flexor-ball squeeze.gif');
+const exercise131 = require('../../assets/exercises/131 Hand gripper squeeze.gif');
+const exercise132 = require('../../assets/exercises/132 Band row.gif');
+const exercise133 = require('../../assets/exercises/133 Standing calf raise.gif');
+const exercise134 = require('../../assets/exercises/134 Wall sit.gif');
+const exercise135 = require('../../assets/exercises/135 Step-ups.gif');
+const exercise136 = require('../../assets/exercises/136 Goblet squat.gif');
+const exercise137 = require('../../assets/exercises/137 Bulgarian split squat.gif');
+const exercise138 = require('../../assets/exercises/138 Pistol squat progression.gif');
+const exercise139 = require('../../assets/exercises/139 Band deadlift.gif');
+const exercise140 = require('../../assets/exercises/140 Dumbbell Romanian deadlift.gif');
+const exercise141 = require('../../assets/exercises/141 Archer push-up.gif');
+const exercise142 = require('../../assets/exercises/142 Hollow body hold.gif');
+const exercise143 = require('../../assets/exercises/143 Tuck L-sit.gif');
+const exercise144 = require('../../assets/exercises/144 L-sit.gif');
+const exercise145 = require('../../assets/exercises/145 Supported dead hang.gif');
+const exercise146 = require('../../assets/exercises/146 Passive dead hang.gif');
 
 export const exercises: Exercise[] = [
   { id: 1, name: "Lumbar Flattening", asset: exercise1 },
@@ -262,6 +281,25 @@ export const exercises: Exercise[] = [
   { id: 125, name: "Heel-to-toe walking", asset: exercise125 },
   { id: 126, name: "Romberg stance", asset: exercise126 },
   { id: 127, name: "Leg swings", asset: exercise127 },
+  { id: 128, name: "Standing hip circles", asset: exercise128 },
+  { id: 129, name: "Seated thoracic rotation", asset: exercise129 },
+  { id: 130, name: "Flexor-ball squeeze", asset: exercise130 },
+  { id: 131, name: "Hand gripper squeeze", asset: exercise131 },
+  { id: 132, name: "Band row", asset: exercise132 },
+  { id: 133, name: "Standing calf raise", asset: exercise133 },
+  { id: 134, name: "Wall sit", asset: exercise134 },
+  { id: 135, name: "Step-ups", asset: exercise135 },
+  { id: 136, name: "Goblet squat", asset: exercise136 },
+  { id: 137, name: "Bulgarian split squat", asset: exercise137 },
+  { id: 138, name: "Pistol squat progression", asset: exercise138 },
+  { id: 139, name: "Band deadlift", asset: exercise139 },
+  { id: 140, name: "Dumbbell Romanian deadlift", asset: exercise140 },
+  { id: 141, name: "Archer push-up", asset: exercise141 },
+  { id: 142, name: "Hollow body hold", asset: exercise142 },
+  { id: 143, name: "Tuck L-sit", asset: exercise143 },
+  { id: 144, name: "L-sit", asset: exercise144 },
+  { id: 145, name: "Supported dead hang", asset: exercise145 },
+  { id: 146, name: "Passive dead hang", asset: exercise146 },
 ];
 
 export const exercisesById = new Map(exercises.map(exercise => [exercise.id, exercise]));

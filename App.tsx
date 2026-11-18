@@ -1944,7 +1944,13 @@ function PastelButton({
       accessibilityLabel={t(accessibilityLabel ?? label)}
       onPress={onPress}>
       <Icon name={icon} size={icon === 'symbolAddBold' ? 26 : 20} color="#1f2d38" />
-      <Text style={styles.pastelButtonText}>{t(label)}</Text>
+      <Text
+        style={styles.pastelButtonText}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}>
+        {t(label)}
+      </Text>
     </Pressable>
   );
 }
@@ -1981,8 +1987,11 @@ const styles = StyleSheet.create({
     gap: 6,
     minHeight: 46,
     borderRadius: 12,
+    paddingHorizontal: 8,
+    overflow: 'hidden',
   },
   pastelButtonText: {
+    flexShrink: 1,
     fontFamily: 'sans-serif-condensed',
     color: '#1f2d38',
     fontSize: 17,
