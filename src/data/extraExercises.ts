@@ -345,3 +345,21 @@ export const extraDefaults: Record<
     },
   ]),
 );
+
+/**
+ * The bundled catalog plus the plan's extras: an extra that now has its own GIF keeps its
+ * category (the generated entry has none), and the rest still show the placeholder picture.
+ */
+export function withExtras<T extends {id: number}>(bundled: T[]): (T & {category?: string})[] {
+  const categories = new Map(extraExercises.map(extra => [extra.id, extra.category]));
+  const have = new Set(bundled.map(item => item.id));
+  return [
+    ...bundled.map(item => {
+      const category = categories.get(item.id);
+      return category ? {...item, category} : item;
+    }),
+    ...(extraExercises.filter(extra => !have.has(extra.id)) as unknown as (T & {
+      category?: string;
+    })[]),
+  ];
+}

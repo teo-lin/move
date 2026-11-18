@@ -8,7 +8,25 @@ import {
   startOfWeek,
   weekdayLabels,
 } from '../data/history';
+import {getLanguage, t} from '../i18n';
 import {Icon} from './Icon';
+
+const romanianMonthNames = [
+  'Ianuarie',
+  'Februarie',
+  'Martie',
+  'Aprilie',
+  'Mai',
+  'Iunie',
+  'Iulie',
+  'August',
+  'Septembrie',
+  'Octombrie',
+  'Noiembrie',
+  'Decembrie',
+];
+
+const romanianWeekdays = ['L', 'Ma', 'Mi', 'J', 'V', 'S', 'D'];
 
 const monthNames = [
   'January',
@@ -42,6 +60,8 @@ export function Calendar({
   onShift: (delta: number) => void;
 }) {
   const today = localDateKey(new Date());
+  const weekdayNames =
+    getLanguage() === 'ro' ? romanianWeekdays : weekdayLabels.map(label => label.charAt(0));
   const weekStart = startOfWeek(new Date());
   const week = Array.from({length: 7}, (_, offset) => {
     const date = new Date(weekStart);
@@ -57,25 +77,26 @@ export function Calendar({
           style={styles.chevron}
           onPress={() => onShift(-1)}
           accessibilityRole="button"
-          accessibilityLabel="Previous month">
+          accessibilityLabel={t('Previous month')}>
           <Icon name="symbolChevronLeft" size={20} color="#1f2d38" />
         </Pressable>
         <Text style={styles.title}>
-          {monthNames[month]} <Text style={styles.year}>{year}</Text>
+          {(getLanguage() === 'ro' ? romanianMonthNames : monthNames)[month]}{' '}
+          <Text style={styles.year}>{year}</Text>
         </Text>
         <Pressable
           style={styles.chevron}
           onPress={() => onShift(1)}
           accessibilityRole="button"
-          accessibilityLabel="Next month">
+          accessibilityLabel={t('Next month')}>
           <Icon name="symbolChevronRight" size={20} color="#1f2d38" />
         </Pressable>
       </View>
 
       <View style={styles.row}>
-        {weekdayLabels.map((label, index) => (
+        {weekdayNames.map((label, index) => (
           <Text style={[styles.weekday, index >= 5 && styles.weekend]} key={label}>
-            {label.charAt(0)}
+            {label}
           </Text>
         ))}
       </View>
@@ -114,8 +135,10 @@ export function Calendar({
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>
-          This week {formatDisplayDate(week[0]).slice(0, 5)}–
-          {formatDisplayDate(week[6]).slice(0, 5)}
+          {t('This week {from}–{to}', {
+            from: formatDisplayDate(week[0]).slice(0, 5),
+            to: formatDisplayDate(week[6]).slice(0, 5),
+          })}
         </Text>
         <View style={styles.weekStrip}>
           {week.map(date => {

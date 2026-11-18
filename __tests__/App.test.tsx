@@ -35,6 +35,7 @@ jest.mock('../src/native/MoveStorage', () => ({
     stopAudio: jest.fn(() => Promise.resolve(true)),
     setKeepAwake: jest.fn(() => Promise.resolve(true)),
     getSpeechSettings: jest.fn(() => Promise.reject(new Error('not in tests'))),
+    setSpeechLanguage: jest.fn(() => Promise.resolve(true)),
   },
 }));
 

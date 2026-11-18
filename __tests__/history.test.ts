@@ -161,11 +161,13 @@ test('catalog categories cover every bundled exercise exactly once', () => {
 
 test('every exercise has a description and the imported programs use real exercises', () => {
   const {descriptions} = require('../src/data/descriptions');
+  const {extraDescriptions} = require('../src/data/extraExercises');
   const {exercises} = require('../src/data/exercises');
   const {importedWorkouts} = require('../src/data/importedWorkouts');
   for (const exercise of exercises) {
-    expect(typeof descriptions[exercise.id]).toBe('string');
-    expect(descriptions[exercise.id].length).toBeGreaterThan(40);
+    const text = descriptions[exercise.id] ?? extraDescriptions[exercise.id];
+    expect(typeof text).toBe('string');
+    expect(text.length).toBeGreaterThan(40);
   }
   expect(importedWorkouts).toHaveLength(9);
   const ids = new Set(exercises.map((e: {id: number}) => e.id));
@@ -216,16 +218,19 @@ test('workout order: saved ids sort the list, unknown workouts keep their place 
 });
 
 test('exercises from the health plan are complete, categorised and do not clash with the catalog', () => {
-  const {extraExercises, extraDescriptions, extraDefaults} = require('../src/data/extraExercises');
+  const {
+    extraExercises,
+    extraDescriptions,
+    extraDefaults,
+    withExtras,
+  } = require('../src/data/extraExercises');
   const {categories, groupByCategory} = require('../src/data/categories');
   const {exercises} = require('../src/data/exercises');
-  const bundled = new Set(exercises.map((e: {id: number}) => e.id));
   const keys = new Set(categories.map((c: {key: string}) => c.key));
   const ids = new Set<number>();
   for (const extra of extraExercises) {
     expect(ids.has(extra.id)).toBe(false);
     ids.add(extra.id);
-    expect(bundled.has(extra.id)).toBe(false);
     expect(extra.id).toBeLessThan(1000);
     expect(keys.has(extra.category)).toBe(true);
     expect(extraDescriptions[extra.id].length).toBeGreaterThan(60);
@@ -237,9 +242,9 @@ test('exercises from the health plan are complete, categorised and do not clash 
     }
   }
   expect(extraExercises.length).toBeGreaterThanOrEqual(30);
-  const groups = groupByCategory([...exercises, ...extraExercises]);
+  const groups = groupByCategory(withExtras(exercises));
   expect(groups.reduce((n: number, g: {items: unknown[]}) => n + g.items.length, 0)).toBe(
-    exercises.length + extraExercises.length,
+    withExtras(exercises).length,
   );
   expect(groups.map((g: {key: string}) => g.key)).toEqual(
     expect.arrayContaining(['balance', 'warmup', 'strength', 'stretch']),

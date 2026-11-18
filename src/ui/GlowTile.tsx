@@ -1,6 +1,8 @@
 import React from 'react';
 import {ImageBackground, ImageSourcePropType, StyleSheet, Text} from 'react-native';
 
+import {t} from '../i18n';
+
 /** Key-number tile on a grainy aurora texture. */
 export function GlowTile({
   value,
@@ -19,7 +21,7 @@ export function GlowTile({
       resizeMethod="scale"
       resizeMode="cover">
       <Text style={styles.value}>{value}</Text>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.label}>{t(label)}</Text>
     </ImageBackground>
   );
 }

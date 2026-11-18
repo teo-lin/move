@@ -1,6 +1,8 @@
 import React, {useState} from 'react';
 import {FlatList, Modal, Pressable, StyleSheet, Text, View} from 'react-native';
 
+import {t} from '../i18n';
+
 export type DropdownOption = {value: string; label: string};
 
 /** Simple dropdown: a field with the current choice that opens a list in a bottom sheet. */
@@ -25,9 +27,9 @@ export function Dropdown({
         style={styles.field}
         onPress={() => setOpen(true)}
         accessibilityRole="button"
-        accessibilityLabel={`${label}: ${current?.label ?? 'not set'}`}>
+        accessibilityLabel={`${label}: ${current?.label ?? t('not set')}`}>
         <Text style={styles.value} numberOfLines={1}>
-          {current?.label ?? 'Choose…'}
+          {current?.label ?? t('Choose…')}
         </Text>
         <Text style={styles.caret}>▾</Text>
       </Pressable>

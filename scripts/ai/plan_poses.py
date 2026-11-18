@@ -1,11 +1,11 @@
-"""Key poses for the exercises from the health plan, as OpenPose-style skeletons.
+"""Key poses for the plan exercises as simple skeletons, drawn as stick figures to guide Gemini.
 
 Coordinates are in body units: x relative to the figure's centre line, y measured down from the
 nose, with nose->ankle = 1.0 (a real body is ~0.89 of its height from nose to ankle, so shoulders
-sit at ~0.12, hips ~0.45, knees ~0.73). `place()` scales a figure into a frame and the same
-skeleton image drives the ControlNet.
+sit at ~0.12, hips ~0.45, knees ~0.73). `draw_stick()` renders a pose as a black stick figure on
+white, to upload next to the reference woman (see README.md in this folder).
 
-Each exercise is 2-4 poses (the same few key poses the catalog GIFs flip between).
+Run `python scripts/ai/plan_poses.py out/ai` to write a PNG per pose.
 """
 
 from pathlib import Path
@@ -18,10 +18,6 @@ LIMBS = [("neck", "r_sho"), ("neck", "l_sho"), ("r_sho", "r_elb"), ("r_elb", "r_
          ("l_elb", "l_wri"), ("neck", "r_hip"), ("r_hip", "r_kne"), ("r_kne", "r_ank"), ("neck", "l_hip"),
          ("l_hip", "l_kne"), ("l_kne", "l_ank"), ("neck", "nose"), ("nose", "r_eye"), ("r_eye", "r_ear"),
          ("nose", "l_eye"), ("l_eye", "l_ear")]
-COLORS = [(255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0), (170, 255, 0), (85, 255, 0), (0, 255, 0),
-          (0, 255, 85), (0, 255, 170), (0, 255, 255), (0, 170, 255), (0, 85, 255), (0, 0, 255), (85, 0, 255),
-          (170, 0, 255), (255, 0, 255), (255, 0, 170), (255, 0, 85)]
-
 
 def standing_front():
     """Neutral standing pose, facing the camera. r_* is the figure's right = image-left."""
@@ -46,7 +42,7 @@ def single_leg_stance():
     # arms a little out for balance, the right foot lifted a few centimetres (knee up in front)
     arms = dict(r_elb=(-0.20, 0.27), l_elb=(0.20, 0.27), r_wri=(-0.29, 0.40), l_wri=(0.29, 0.40))
     start = with_(stand, **arms)
-    lifted = with_(stand, **arms, r_kne=(-0.075, 0.64), r_ank=(-0.075, 0.86))
+    lifted = with_(stand, **arms, r_kne=(-0.13, 0.58), r_ank=(-0.10, 0.80))
     return [start, lifted]
 
 
@@ -90,13 +86,6 @@ EXERCISES = {
     "Romberg stance": romberg_stance,
 }
 
-# extra words for the image prompt (props, expression), per exercise
-PROMPT_EXTRA = {
-    "Tandem stance": "standing with one foot directly in front of the other in a straight line, heel touching toes, ",
-    "Heel-to-toe walking": "walking in a straight line placing one foot directly in front of the other, ",
-    "Romberg stance": "standing still with the feet together and the eyes closed, ",
-    "Single-leg stance": "balancing, ",
-}
 
 
 def to_pixels(pose, size, height_fraction=0.80):
@@ -107,28 +96,31 @@ def to_pixels(pose, size, height_fraction=0.80):
     return {name: (cx + x * scale, top + y * scale) for name, (x, y) in pose.items()}
 
 
-def draw_openpose(pose, size=(1344, 768), background=(0, 0, 0), width=None):
-    """The skeleton image a ControlNet OpenPose model expects (coloured limbs on black)."""
+def draw_stick(pose, size=(1280, 720), width=8):
+    """Black stick figure (head circle, torso, limbs) on white."""
     w, h = size
-    width = width or max(4, round(h / 120))
-    img = Image.new("RGB", size, background)
+    img = Image.new("RGB", size, "white")
     d = ImageDraw.Draw(img)
-    px = to_pixels(pose, size)
-    for (a, b), color in zip(LIMBS, COLORS):
-        d.line([px[a], px[b]], fill=color, width=width)
-    r = width * 0.9
-    for i, name in enumerate(NAMES):
-        x, y = px[name]
-        d.ellipse([x - r, y - r, x + r, y + r], fill=COLORS[i % len(COLORS)])
+    px = to_pixels(pose, size, 0.78)
+    face = ("nose", "r_eye", "l_eye", "r_ear", "l_ear")
+    for a, b in LIMBS:
+        if a in face or b in face:
+            continue
+        d.line([px[a], px[b]], fill="black", width=width)
+    x, y = px["nose"]
+    r = h * 0.045
+    d.ellipse([x - r, y - r * 0.9, x + r, y + r * 1.1], outline="black", width=width)
+    d.line([px["neck"], (x, y + r * 1.1)], fill="black", width=width)
     return img
 
 
 if __name__ == "__main__":
     import sys
+
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("out/ai")
     out.mkdir(parents=True, exist_ok=True)
     for name, build in EXERCISES.items():
         for i, pose in enumerate(build(), 1):
             slug = name.lower().replace(" ", "-")
-            draw_openpose(pose).save(out / f"{slug}-pose{i}.png")
+            draw_stick(pose).save(out / f"{slug}-pose{i}.png")
             print("wrote", out / f"{slug}-pose{i}.png")

@@ -19,7 +19,7 @@ import {
 import {SafeAreaView} from 'react-native-safe-area-context';
 
 import {descriptions} from './src/data/descriptions';
-import {extraDefaults, extraDescriptions, extraExercises} from './src/data/extraExercises';
+import {extraDefaults, extraDescriptions, withExtras} from './src/data/extraExercises';
 import {Exercise, exercises} from './src/data/exercises';
 import {
   CustomExercise,
@@ -118,9 +118,8 @@ export default function App(): React.JSX.Element {
   const [cardBackgrounds, setCardBackgrounds] = useState<Record<string, number> | null>(null);
   const allExercises = useMemo(
     () => [
-      ...exercises,
-      // plan exercises without an animation yet (a generated GIF with the same id replaces them)
-      ...extraExercises.filter(extra => !exercises.some(item => item.id === extra.id)),
+      // plan exercises without an animation yet show a placeholder until their GIF exists
+      ...withExtras(exercises),
       ...customExercises.map(toExercise),
     ],
     [customExercises],
@@ -147,6 +146,9 @@ export default function App(): React.JSX.Element {
     quote: Quote;
     summary: string;
   } | null>(null);
+  useEffect(() => {
+    fire(MoveStorage.setSpeechLanguage(language));
+  }, [language]);
   const chooseLanguage = (next: Language) => {
     setLanguage(next);
     setLanguageState(next);
@@ -330,9 +332,9 @@ export default function App(): React.JSX.Element {
       setRestRemaining(activeStep.secondsPerRep);
       setPhase('rest');
     } else if (phase === 'announce') {
-      const name = exerciseMap.get(activeStep.exerciseId)?.name ?? 'Exercise';
+      const name = exerciseMap.get(activeStep.exerciseId)?.name ?? t('Exercise');
       speakThen(
-        activeStep.twoSides ? `${name}, left` : name,
+        activeStep.twoSides ? t('{name}, left', {name}) : name,
         () => {
           setCountdown(5);
           setPhase('countdown');
@@ -349,7 +351,7 @@ export default function App(): React.JSX.Element {
         }
         timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       } else {
-        fire(MoveStorage.speak('Go'));
+        fire(MoveStorage.speak(t('Go')));
         timer = setTimeout(() => {
           if (!sideChanged) {
             setRep(0);
@@ -361,7 +363,7 @@ export default function App(): React.JSX.Element {
 
     if (phase === 'change-side') {
       speakThen(
-        'Right side',
+        t('Right side'),
         () => {
           setSideChanged(true);
           setCountdown(5);
@@ -441,7 +443,7 @@ export default function App(): React.JSX.Element {
 
   function startWorkout(workout: Workout) {
     if (exerciseCount(workout) === 0) {
-      Alert.alert('No exercises yet', 'Edit the workout and add some exercises first.');
+      Alert.alert(t('No exercises yet'), t('Edit the workout and add some exercises first.'));
       return;
     }
     setActiveWorkout(workout);
@@ -510,7 +512,7 @@ export default function App(): React.JSX.Element {
 
   function startRest(seconds: number) {
     fire(MoveStorage.stopAudio());
-    fire(MoveStorage.speak('Rest'));
+    fire(MoveStorage.speak(t('Rest')));
     setRestTotal(seconds);
     setRestRemaining(seconds);
     setRep(0);
@@ -607,7 +609,7 @@ export default function App(): React.JSX.Element {
     };
 
     saveHistory([entry, ...history]).catch(error => {
-      Alert.alert('Could not save workout', String(error));
+      Alert.alert(t('Could not save workout'), String(error));
     });
     setActiveWorkout(null);
     if (entry.completed >= entry.total) {
@@ -638,7 +640,7 @@ export default function App(): React.JSX.Element {
   function addWorkout() {
     const workout: Workout = {
       id: `custom-${Date.now()}`,
-      name: 'New workout',
+      name: t('New workout'),
       custom: true,
       steps: [],
     };
@@ -648,10 +650,10 @@ export default function App(): React.JSX.Element {
   }
 
   function deleteSelectedWorkout() {
-    Alert.alert('Delete workout?', workoutLabel(selectedWorkout), [
-      {text: 'Cancel', style: 'cancel'},
+    Alert.alert(t('Delete workout?'), workoutLabel(selectedWorkout), [
+      {text: t('Cancel'), style: 'cancel'},
       {
-        text: 'Delete',
+        text: t('Delete'),
         style: 'destructive',
         onPress: () => {
           setWorkouts(list => list.filter(item => item.id !== selectedWorkout.id));
@@ -687,8 +689,8 @@ export default function App(): React.JSX.Element {
     setNewExerciseName('');
     setCreatingExercise(false);
     Alert.alert(
-      'Exercise added',
-      `"${name}" is in the catalog. Add it to a workout with Edit → Add Exercise.`,
+      t('Exercise added'),
+      t('"{name}" is in the catalog. Add it to a workout with Edit → Add Exercise.', {name}),
     );
   }
 
@@ -724,7 +726,7 @@ export default function App(): React.JSX.Element {
     setUndoSessions(list => [...list, entry]);
     setOpenSwipe(null);
     saveHistory(history.filter(item => item.id !== entry.id)).catch(error =>
-      Alert.alert('Could not delete', String(error)),
+      Alert.alert(t('Could not delete'), String(error)),
     );
   }
 
@@ -734,7 +736,9 @@ export default function App(): React.JSX.Element {
       return;
     }
     setUndoSessions(list => list.slice(0, -1));
-    saveHistory([...history, last]).catch(error => Alert.alert('Could not restore', String(error)));
+    saveHistory([...history, last]).catch(error =>
+      Alert.alert(t('Could not restore'), String(error)),
+    );
   }
 
   /** Built-in workouts are remembered as hidden so they stay deleted after a restart. */
@@ -821,9 +825,9 @@ export default function App(): React.JSX.Element {
   async function exportCsv() {
     try {
       const path = await MoveStorage.exportCsv('back-exercises.csv', historyCsv());
-      Alert.alert('Exported', path);
+      Alert.alert(t('Exported'), path);
     } catch (error) {
-      Alert.alert('Export failed', String(error));
+      Alert.alert(t('Export failed'), String(error));
     }
   }
 
@@ -831,7 +835,7 @@ export default function App(): React.JSX.Element {
     try {
       await Share.share({title: 'back-exercises.csv', message: historyCsv()});
     } catch (error) {
-      Alert.alert('Share failed', String(error));
+      Alert.alert(t('Share failed'), String(error));
     }
   }
 
@@ -861,35 +865,39 @@ export default function App(): React.JSX.Element {
           <Text style={styles.meta}>
             {activeWorkout.steps.slice(0, activeIndex + 1).filter(item => !item.breather).length} /{' '}
             {exerciseCount(activeWorkout)} ·{' '}
-            {activeStep.breather ? 'breather' : phaseLabel(phase, countdown)} ·{' '}
+            {activeStep.breather ? t('breather') : phaseLabel(phase, countdown)} ·{' '}
             {formatDuration(elapsed)}
           </Text>
           {phase === 'rest' ? (
             <View style={styles.restPanel}>
-              <Text style={styles.restTitle}>{activeStep.breather ? 'Breather' : 'Rest'}</Text>
+              <Text style={styles.restTitle}>
+                {activeStep.breather ? t('Breather') : t('Rest')}
+              </Text>
               <Text style={styles.restCount}>{restRemaining}s</Text>
               <SegmentBar total={1} done={0} fill={restTotal > 0 ? restRemaining / restTotal : 0} />
               {(() => {
                 const upcoming = activeStep.breather
                   ? exerciseMap.get(activeWorkout.steps[stepAfter(activeIndex)]?.exerciseId ?? -1)
                   : activeExercise;
-                return upcoming ? <Text style={styles.meta}>Up next: {upcoming.name}</Text> : null;
+                return upcoming ? (
+                  <Text style={styles.meta}>{t('Up next: {name}', {name: upcoming.name})}</Text>
+                ) : null;
               })()}
             </View>
           ) : activeExercise ? (
             <ExercisePreview exercise={activeExercise} fill />
           ) : (
-            <Text style={styles.bodyText}>Missing exercise.</Text>
+            <Text style={styles.bodyText}>{t('Missing exercise.')}</Text>
           )}
           {phase !== 'rest' && (
             <>
               {activeStep.twoSides && (
                 <View style={styles.sideRow}>
                   <Text style={[styles.sideBadge, !sideChanged && styles.sideBadgeActive]}>
-                    Left
+                    {t('Left')}
                   </Text>
                   <Text style={[styles.sideBadge, sideChanged && styles.sideBadgeActive]}>
-                    Right
+                    {t('Right')}
                   </Text>
                 </View>
               )}
@@ -899,12 +907,7 @@ export default function App(): React.JSX.Element {
                 rep={rep}
                 running={phase === 'work' && !paused}
               />
-              <Text style={styles.prescription}>
-                {activeStep.twoSides
-                  ? `${activeStep.repetitions / 2} per side`
-                  : `${activeStep.repetitions} reps`}{' '}
-                · {activeStep.secondsPerRep}s each
-              </Text>
+              <Text style={styles.prescription}>{prescription(activeStep)}</Text>
             </>
           )}
           <View style={styles.iconRow}>
@@ -992,18 +995,18 @@ export default function App(): React.JSX.Element {
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <SmallButton label="‹ Workouts" onPress={() => setCreatingExercise(false)} />
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>New exercise</Text>
+            <Text style={styles.cardTitle}>{t('New exercise')}</Text>
             <TextInput
               style={styles.input}
               placeholderTextColor="#8b97a3"
-              placeholder="Exercise name"
+              placeholder={t('Exercise name')}
               value={newExerciseName}
               onChangeText={setNewExerciseName}
               autoFocus
               onSubmitEditing={saveNewExercise}
             />
             <Text style={styles.meta}>
-              It gets a placeholder picture; reps and timing are set per workout.
+              {t('It gets a placeholder picture; reps and timing are set per workout.')}
             </Text>
             <Action label="Save exercise" onPress={saveNewExercise} />
           </View>
@@ -1052,8 +1055,10 @@ export default function App(): React.JSX.Element {
                           style={styles.workoutInfo}
                           accessible
                           accessibilityRole="button"
-                          accessibilityLabel={`Start ${label}`}
-                          accessibilityActions={[{name: 'activate', label: `Start ${label}`}]}
+                          accessibilityLabel={t('Start {name}', {name: label})}
+                          accessibilityActions={[
+                            {name: 'activate', label: t('Start {name}', {name: label})},
+                          ]}
                           onAccessibilityAction={() => playWorkout(workout)}>
                           <Text
                             style={styles.cardTitle}
@@ -1063,18 +1068,23 @@ export default function App(): React.JSX.Element {
                             {label}
                           </Text>
                           <Text style={styles.stepMeta} numberOfLines={1}>
-                            {exerciseCount(workout)}{' '}
-                            {exerciseCount(workout) === 1 ? 'exercise' : 'exercises'} · ~
-                            {Math.round(estimateSeconds(workout) / 60)} min ·{' '}
+                            {exercisesLabel(exerciseCount(workout))} · ~
+                            {t('{minutes} min', {
+                              minutes: Math.round(estimateSeconds(workout) / 60),
+                            })}{' '}
+                            ·{' '}
                             {done.length === 0
-                              ? 'not done yet'
-                              : `${done.length}× · last ${formatDisplayDate(last).slice(0, 5)}`}
+                              ? t('not done yet')
+                              : t('{count}× · last {date}', {
+                                  count: done.length,
+                                  date: formatDisplayDate(last).slice(0, 5),
+                                })}
                           </Text>
                         </View>
                       </Textured>
                       <View
                         style={[styles.sideHandle, styles.workoutListHandle]}
-                        accessibilityLabel="Press and hold the tile to reorder"
+                        accessibilityLabel={t('Press and hold the tile to reorder')}
                         pointerEvents="none">
                         <Icon name="symbolDragIndicator" size={14} color="#8b97a3" />
                       </View>
@@ -1099,7 +1109,7 @@ export default function App(): React.JSX.Element {
               <TextInput
                 style={styles.input}
                 placeholderTextColor="#8b97a3"
-                placeholder="Search exercises"
+                placeholder={t('Search exercises')}
                 value={pickerFilter}
                 onChangeText={setPickerFilter}
               />
@@ -1119,20 +1129,23 @@ export default function App(): React.JSX.Element {
               <TextInput
                 style={[styles.input, styles.cardTitle]}
                 value={selectedWorkout.name}
-                placeholder="Workout name"
+                placeholder={t('Workout name')}
                 onChangeText={name => updateSelectedWorkout(workout => ({...workout, name}))}
               />
             ) : (
               <Text style={styles.cardTitle}>{workoutLabel(selectedWorkout)}</Text>
             )}
             <Text style={styles.meta}>
-              {exerciseCount(selectedWorkout)}{' '}
-              {exerciseCount(selectedWorkout) === 1 ? 'exercise' : 'exercises'} · about{' '}
-              {Math.round(estimateSeconds(selectedWorkout) / 60)} min
+              {exercisesLabel(exerciseCount(selectedWorkout))} ·{' '}
+              {t('about {minutes} min', {
+                minutes: Math.round(estimateSeconds(selectedWorkout) / 60),
+              })}
             </Text>
             <View style={styles.restSetting}>
               <Text style={styles.bodyText}>
-                Rest between exercises: {selectedWorkout.restSeconds ?? 0}s
+                {t('Rest between exercises: {seconds}s', {
+                  seconds: selectedWorkout.restSeconds ?? 0,
+                })}
               </Text>
               <View style={styles.smallControlRow}>
                 <SmallButton
@@ -1173,12 +1186,12 @@ export default function App(): React.JSX.Element {
                     key={`breather-${index}`}>
                     <View
                       style={styles.breatherHandle}
-                      accessibilityLabel="Drag to reorder (press and hold)"
+                      accessibilityLabel={t('Drag to reorder (press and hold)')}
                       {...reorder.getHandleProps(index)}>
                       <Icon name="symbolDragIndicator" size={18} color="#9aa4ad" />
                     </View>
                     <Text style={styles.breatherLabel} numberOfLines={1}>
-                      ≈ Breather {step.secondsPerRep}s
+                      {t('≈ Breather {seconds}s', {seconds: step.secondsPerRep})}
                     </Text>
                     <GridButton
                       label="- sec"
@@ -1210,7 +1223,7 @@ export default function App(): React.JSX.Element {
                     <View style={styles.stepCard}>
                       <View
                         style={styles.sideHandle}
-                        accessibilityLabel="Drag to reorder (press and hold)"
+                        accessibilityLabel={t('Drag to reorder (press and hold)')}
                         {...reorder.getHandleProps(index)}>
                         <Icon name="symbolDragIndicator" size={14} color="#8b97a3" />
                       </View>
@@ -1224,15 +1237,10 @@ export default function App(): React.JSX.Element {
                       <View style={styles.stepMain}>
                         <View style={styles.stepTitleRow}>
                           <Text style={styles.stepName} numberOfLines={2}>
-                            {number}. {exercise ? exercise.name : 'Removed exercise'}
+                            {number}. {exercise ? exercise.name : t('Removed exercise')}
                           </Text>
                         </View>
-                        <Text style={styles.stepMeta}>
-                          {step.twoSides
-                            ? `${step.repetitions / 2} per side`
-                            : `${step.repetitions} reps`}{' '}
-                          · {step.secondsPerRep}s each
-                        </Text>
+                        <Text style={styles.stepMeta}>{prescription(step)}</Text>
                         <View style={styles.editGrid}>
                           <View style={styles.editColumns}>
                             <View style={styles.editRow}>
@@ -1284,10 +1292,10 @@ export default function App(): React.JSX.Element {
           <Pressable
             style={styles.addButton}
             accessibilityRole="button"
-            accessibilityLabel="Add exercise to workout"
+            accessibilityLabel={t('Add exercise to workout')}
             onPress={() => setPicking(true)}>
             <Icon name="symbolAdd" size={22} color="#126b46" />
-            <Text style={styles.addButtonText}>Add Exercise</Text>
+            <Text style={styles.addButtonText}>{t('Add Exercise')}</Text>
           </Pressable>
         </ScrollView>
       )}
@@ -1298,18 +1306,22 @@ export default function App(): React.JSX.Element {
           <ExercisePreview exercise={detailExercise} large />
           {descriptions[detailExercise.id] ?? extraDescriptions[detailExercise.id] ? (
             <View style={styles.descriptionCard}>
-              <Text style={styles.descriptionTitle}>How to</Text>
+              <Text style={styles.descriptionTitle}>{t('How to')}</Text>
               <Text style={styles.descriptionText}>
                 {descriptions[detailExercise.id] ?? extraDescriptions[detailExercise.id]}
               </Text>
             </View>
           ) : null}
           <Text style={styles.meta}>
-            Used in:{' '}
-            {workouts
-              .filter(workout => workout.steps.some(item => item.exerciseId === detailExercise.id))
-              .map(workoutLabel)
-              .join(', ') || 'no workout yet'}
+            {t('Used in: {list}', {
+              list:
+                workouts
+                  .filter(workout =>
+                    workout.steps.some(item => item.exerciseId === detailExercise.id),
+                  )
+                  .map(workoutLabel)
+                  .join(', ') || t('no workout yet'),
+            })}
           </Text>
         </ScrollView>
       )}
@@ -1330,10 +1342,10 @@ export default function App(): React.JSX.Element {
             onShift={shiftCalendar}
           />
           {history.length > 0 && (
-            <Text style={styles.meta}>Swipe a session left twice to delete it.</Text>
+            <Text style={styles.meta}>{t('Swipe a session left twice to delete it.')}</Text>
           )}
           {history.length === 0 ? (
-            <Text style={styles.empty}>No completed sessions yet.</Text>
+            <Text style={styles.empty}>{t('No completed sessions yet.')}</Text>
           ) : (
             groupByLocalDate(history).map((group, groupIndex) => (
               <View style={styles.dayGroup} key={group.key}>
@@ -1355,8 +1367,11 @@ export default function App(): React.JSX.Element {
                             {csvWorkoutLabel(entry.workout, workouts)}
                           </Text>
                           <Text style={styles.stepMeta}>
-                            {formatTime(entry.timestamp)} · {entry.completed} / {entry.total}{' '}
-                            exercises
+                            {formatTime(entry.timestamp)} ·{' '}
+                            {t('{done} / {total} exercises', {
+                              done: entry.completed,
+                              total: entry.total,
+                            })}
                           </Text>
                         </View>
                         <Text style={styles.sessionDuration}>
@@ -1374,10 +1389,10 @@ export default function App(): React.JSX.Element {
 
       {screen === 'settings' && (
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.cardTitle}>Settings</Text>
+          <Text style={styles.cardTitle}>{t('Settings')}</Text>
           <View style={styles.card}>
             <Dropdown
-              label="Language"
+              label={t('Language')}
               value={language}
               options={languages}
               onChange={value => chooseLanguage(parseLanguage(value))}
@@ -1385,10 +1400,11 @@ export default function App(): React.JSX.Element {
           </View>
           {deletedWorkoutIds.length > 0 ? (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Deleted workouts</Text>
+              <Text style={styles.cardTitle}>{t('Deleted workouts')}</Text>
               <Text style={styles.meta}>
-                {deletedWorkoutIds.length} built-in workout
-                {deletedWorkoutIds.length === 1 ? ' is' : 's are'} hidden.
+                {deletedWorkoutIds.length === 1
+                  ? t('1 built-in workout is hidden.')
+                  : t('{count} built-in workouts are hidden.', {count: deletedWorkoutIds.length})}
               </Text>
               <PastelButton
                 label="Restore"
@@ -1417,21 +1433,34 @@ export default function App(): React.JSX.Element {
 
 function phaseLabel(phase: Phase, countdown: number): string {
   if (phase === 'announce') {
-    return 'announce';
+    return t('announce');
   }
   if (phase === 'countdown') {
-    return countdown > 0 ? `countdown ${countdown}` : 'go';
+    return countdown > 0 ? t('countdown {count}', {count: countdown}) : t('go');
   }
   if (phase === 'change-side') {
-    return 'change side';
+    return t('change side');
   }
   if (phase === 'finishing') {
-    return 'finishing';
+    return t('finishing');
   }
   if (phase === 'rest') {
-    return 'rest';
+    return t('rest');
   }
-  return 'work';
+  return t('work');
+}
+
+/** "3 exercises" / "1 exercise". */
+function exercisesLabel(count: number): string {
+  return count === 1 ? t('1 exercise') : t('{count} exercises', {count});
+}
+
+/** "10 reps · 3s each" / "5 per side · 3s each". */
+function prescription(step: WorkoutStep): string {
+  const amount = step.twoSides
+    ? t('{count} per side', {count: step.repetitions / 2})
+    : t('{count} reps', {count: step.repetitions});
+  return `${amount} · ${t('{seconds}s each', {seconds: step.secondsPerRep})}`;
 }
 
 function fire(promise: Promise<unknown>) {
@@ -1488,7 +1517,7 @@ function Shell({
         <Pressable
           style={styles.undoButton}
           accessibilityRole="button"
-          accessibilityLabel="Undo delete"
+          accessibilityLabel={t('Undo delete')}
           onPress={undo.onPress}>
           <Icon name="symbolUndo" size={20} color="#1f2d38" />
           <Text style={styles.undoText}>
@@ -1580,9 +1609,10 @@ function RepProgress({step, rep, running}: {step: WorkoutStep; rep: number; runn
     <View
       style={styles.segmentBar}
       accessibilityRole="progressbar"
-      accessibilityLabel={`Repetition ${Math.min(rep + 1, step.repetitions)} of ${
-        step.repetitions
-      }`}>
+      accessibilityLabel={t('Repetition {current} of {total}', {
+        current: Math.min(rep + 1, step.repetitions),
+        total: step.repetitions,
+      })}>
       {Array.from({length: step.repetitions}, (_, index) => (
         <View key={index} style={[styles.repSegment, index === half && styles.repSegmentSideGap]}>
           {index < rep && <View style={[styles.repSegmentFill, styles.fullWidth]} />}
@@ -1667,7 +1697,7 @@ function StatsScreen({
         <GlowTile label="Minutes" value={stats.totalMinutes} texture={tileBackgrounds.lilac} />
       </View>
       {stats.byWorkout.length === 0 ? (
-        <Text style={styles.meta}>No completed sessions yet.</Text>
+        <Text style={styles.meta}>{t('No completed sessions yet.')}</Text>
       ) : (
         stats.byWorkout.map(item => {
           const index = workoutIndexFor(item.workout, workouts);
@@ -1694,8 +1724,10 @@ function StatsScreen({
                 />
               </View>
               <Text style={styles.stepMeta}>
-                last {formatDisplayDate(item.lastTimestamp)} · {Math.round(item.totalSeconds / 60)}{' '}
-                min in total
+                {t('last {date} · {minutes} min in total', {
+                  date: formatDisplayDate(item.lastTimestamp),
+                  minutes: Math.round(item.totalSeconds / 60),
+                })}
               </Text>
             </Textured>
           );
@@ -1705,7 +1737,7 @@ function StatsScreen({
   );
 }
 
-const VOICE_SAMPLE = 'Diagonal crunches, left. Go.';
+const voiceSample = () => t('Diagonal crunches, left. Go.');
 
 function VoiceSettings() {
   const [settings, setSettings] = useState<SpeechSettings | null>(null);
@@ -1726,40 +1758,42 @@ function VoiceSettings() {
   const pickEngine = async (name: string) => {
     await MoveStorage.setSpeechEngine(name);
     await reload();
-    fire(MoveStorage.speak(VOICE_SAMPLE));
+    fire(MoveStorage.speak(voiceSample()));
   };
   const pickVoice = async (name: string) => {
     await MoveStorage.setSpeechVoice(name);
     await reload();
-    fire(MoveStorage.speak(VOICE_SAMPLE));
+    fire(MoveStorage.speak(voiceSample()));
   };
   const changeRate = async (delta: number) => {
     await MoveStorage.setSpeechRate(Math.round((settings.rate + delta) * 100) / 100);
     await reload();
-    fire(MoveStorage.speak(VOICE_SAMPLE));
+    fire(MoveStorage.speak(voiceSample()));
   };
 
   return (
     <View style={styles.card}>
-      <Text style={styles.cardTitle}>Voice</Text>
-      <Text style={styles.meta}>Offline voices on this phone. Picking one plays a sample.</Text>
+      <Text style={styles.cardTitle}>{t('Voice')}</Text>
+      <Text style={styles.meta}>
+        {t('Offline voices on this phone. Picking one plays a sample.')}
+      </Text>
       <Dropdown
-        label="Speech engine"
+        label={t('Speech engine')}
         value={settings.engine}
         options={settings.engines.map(engine => ({value: engine.name, label: engine.label}))}
         onChange={pickEngine}
       />
       <Dropdown
-        label="Voice"
+        label={t('Voice')}
         value={settings.voice}
         options={settings.voices.map(voice => ({value: voice.name, label: voiceLabel(voice)}))}
         onChange={pickVoice}
       />
       <View style={styles.smallControlRow}>
         <SmallButton label="slower" onPress={() => changeRate(-0.05)} />
-        <Text style={styles.bodyText}>speed {settings.rate.toFixed(2)}</Text>
+        <Text style={styles.bodyText}>{t('speed {rate}', {rate: settings.rate.toFixed(2)})}</Text>
         <SmallButton label="faster" onPress={() => changeRate(0.05)} />
-        <SmallButton label="test" onPress={() => fire(MoveStorage.speak(VOICE_SAMPLE))} />
+        <SmallButton label="test" onPress={() => fire(MoveStorage.speak(voiceSample()))} />
       </View>
     </View>
   );
@@ -1781,7 +1815,10 @@ function voiceLabel(voice: {name: string; locale: string}): string {
     .replace(/^[a-z]{2}-[a-z]{2}-x-/i, '')
     .replace(/-(local|network)$/, '')
     .replace(/^[a-z]{2}-[A-Z]{2}-language$/i, 'default');
-  return `${localeNames[voice.locale] ?? voice.locale} · voice ${short}`;
+  return t('{locale} · voice {name}', {
+    locale: localeNames[voice.locale] ?? voice.locale,
+    name: short,
+  });
 }
 
 function Tab({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
@@ -1839,7 +1876,7 @@ function IconButton({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={t(label)}
       disabled={disabled}
       style={[styles.iconButton, disabled && styles.actionDisabled]}
       onPress={onPress}>
@@ -1849,7 +1886,7 @@ function IconButton({
         numberOfLines={1}
         adjustsFontSizeToFit
         minimumFontScale={0.7}>
-        {caption}
+        {t(caption)}
       </Text>
     </Pressable>
   );
@@ -1859,10 +1896,10 @@ function Action({label, onPress}: {label: string; onPress: () => void}) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={t(label)}
       style={styles.action}
       onPress={onPress}>
-      <Text style={styles.actionText}>{label}</Text>
+      <Text style={styles.actionText}>{t(label)}</Text>
     </Pressable>
   );
 }
@@ -1873,8 +1910,8 @@ function GridButton({label, onPress}: {label: string; onPress: () => void}) {
       style={styles.gridButton}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={label}>
-      <Text style={styles.gridButtonText}>{label}</Text>
+      accessibilityLabel={t(label)}>
+      <Text style={styles.gridButtonText}>{t(label)}</Text>
     </Pressable>
   );
 }
@@ -1904,10 +1941,10 @@ function PastelButton({
     <Pressable
       style={[styles.pastelButton, {backgroundColor: color}]}
       accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityLabel={t(accessibilityLabel ?? label)}
       onPress={onPress}>
       <Icon name={icon} size={icon === 'symbolAddBold' ? 26 : 20} color="#1f2d38" />
-      <Text style={styles.pastelButtonText}>{label}</Text>
+      <Text style={styles.pastelButtonText}>{t(label)}</Text>
     </Pressable>
   );
 }
@@ -1918,8 +1955,8 @@ function SmallButton({label, onPress}: {label: string; onPress: () => void}) {
       style={styles.smallButton}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={label}>
-      <Text style={styles.smallButtonText}>{label}</Text>
+      accessibilityLabel={t(label)}>
+      <Text style={styles.smallButtonText}>{t(label)}</Text>
     </Pressable>
   );
 }
@@ -1935,19 +1972,6 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#d9dee3',
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  settingsButton: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 22,
   },
   pastelButton: {
     flex: 1,
@@ -2243,12 +2267,6 @@ const styles = StyleSheet.create({
     fontSize: 64,
     fontWeight: '700',
   },
-  exerciseName: {
-    fontFamily: 'sans-serif-condensed',
-    color: '#1f2d38',
-    fontSize: 17,
-    fontWeight: '600',
-  },
   preview: {
     flex: 1,
     alignItems: 'center',
@@ -2367,16 +2385,6 @@ const styles = StyleSheet.create({
     borderColor: '#d9dee3',
     backgroundColor: '#ffffff',
   },
-  editButton: {
-    width: 52, // twice the old 26 dp buttons
-    height: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    borderWidth: 1,
-    borderColor: 'rgba(31,45,56,0.15)',
-  },
   workoutListHandle: {
     top: '7.7%', // 10% shorter than the editor's handle (94% of the card -> ~85%)
     bottom: '7.7%',
@@ -2493,19 +2501,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-  },
-  statTile: {
-    flexGrow: 1,
-    flexBasis: '45%',
-    borderWidth: 1,
-    borderColor: '#d9dee3',
-    borderRadius: 8,
-    padding: 14,
-    backgroundColor: '#fbfcfd',
-  },
-  statValue: {
-    color: '#126b46',
-    fontSize: 28,
-    fontWeight: '700',
   },
 });

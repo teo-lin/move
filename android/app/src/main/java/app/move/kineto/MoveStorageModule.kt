@@ -109,6 +109,12 @@ class MoveStorageModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun setSpeechLanguage(tag: String, promise: Promise) {
+    speech.setLanguage(tag)
+    promise.resolve(true)
+  }
+
+  @ReactMethod
   fun setSpeechRate(rate: Double, promise: Promise) {
     speech.setRate(rate.toFloat())
     promise.resolve(true)

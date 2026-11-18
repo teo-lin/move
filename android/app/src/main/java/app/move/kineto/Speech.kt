@@ -26,6 +26,7 @@ class Speech(private val context: Context) {
   private var ready = false
   private var onReady: (() -> Unit)? = null
   private var currentEngine: String? = null
+  private var languageTag = "en"
 
   init {
     start(prefs.getString(KEY_ENGINE, null) ?: preferredEngine(), null)
@@ -62,6 +63,24 @@ class Speech(private val context: Context) {
     val voice = tts?.voices?.firstOrNull { it.name == name } ?: return false
     prefs.edit().putString(KEY_VOICE, name).apply()
     return tts?.setVoice(voice) == TextToSpeech.SUCCESS
+  }
+
+  /** Switches the spoken language ("ro" or anything else for English); keeps the chosen voice for English. */
+  fun setLanguage(tag: String) {
+    languageTag = if (tag == "ro") "ro" else "en"
+    tts?.let { if (ready) applyLanguage(it) }
+  }
+
+  private fun applyLanguage(engine: TextToSpeech) {
+    if (languageTag == "ro") {
+      if (engine.setLanguage(Locale("ro", "RO")) >= TextToSpeech.LANG_AVAILABLE) return
+    }
+    if (engine.setLanguage(Locale.UK) < TextToSpeech.LANG_AVAILABLE) {
+      engine.setLanguage(Locale.US)
+    }
+    prefs.getString(KEY_VOICE, null)?.let { saved ->
+      engine.voices?.firstOrNull { it.name == saved }?.let { engine.setVoice(it) }
+    }
   }
 
   fun setRate(value: Float) {
@@ -116,12 +135,7 @@ class Speech(private val context: Context) {
         override fun onError(utteranceId: String) = finish(utteranceId)
         override fun onStop(utteranceId: String, interrupted: Boolean) = finish(utteranceId)
       })
-      if (engine.setLanguage(Locale.UK) < TextToSpeech.LANG_AVAILABLE) {
-        engine.setLanguage(Locale.US)
-      }
-      prefs.getString(KEY_VOICE, null)?.let { saved ->
-        engine.voices?.firstOrNull { it.name == saved }?.let { engine.setVoice(it) }
-      }
+      applyLanguage(engine)
       engine.setSpeechRate(rate)
     }
     onReady?.invoke()

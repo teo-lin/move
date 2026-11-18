@@ -63,3 +63,7 @@ Thumbs.db
 
 # AI generation review output
 out/
+
+# Python bytecode
+__pycache__/
+*.pyc

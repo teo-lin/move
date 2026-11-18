@@ -128,6 +128,11 @@ const exercise119 = require('../../assets/exercises/119 Roll Up.gif');
 const exercise120 = require('../../assets/exercises/120 Roll Down.gif');
 const exercise121 = require('../../assets/exercises/121 Wall push-up.gif');
 const exercise122 = require('../../assets/exercises/122 Band pull-apart.gif');
+const exercise123 = require('../../assets/exercises/123 Tandem stance.gif');
+const exercise124 = require('../../assets/exercises/124 Single-leg stance.gif');
+const exercise125 = require('../../assets/exercises/125 Heel-to-toe walking.gif');
+const exercise126 = require('../../assets/exercises/126 Romberg stance.gif');
+const exercise127 = require('../../assets/exercises/127 Leg swings.gif');
 
 export const exercises: Exercise[] = [
   { id: 1, name: "Lumbar Flattening", asset: exercise1 },
@@ -252,6 +257,11 @@ export const exercises: Exercise[] = [
   { id: 120, name: "Roll Down", asset: exercise120 },
   { id: 121, name: "Wall push-up", asset: exercise121 },
   { id: 122, name: "Band pull-apart", asset: exercise122 },
+  { id: 123, name: "Tandem stance", asset: exercise123 },
+  { id: 124, name: "Single-leg stance", asset: exercise124 },
+  { id: 125, name: "Heel-to-toe walking", asset: exercise125 },
+  { id: 126, name: "Romberg stance", asset: exercise126 },
+  { id: 127, name: "Leg swings", asset: exercise127 },
 ];
 
 export const exercisesById = new Map(exercises.map(exercise => [exercise.id, exercise]));

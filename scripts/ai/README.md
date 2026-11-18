@@ -1,38 +1,29 @@
-# AI exercise animations (local)
+# Exercise pictures (AI-assisted)
 
-Generates new exercise GIFs on this PC's GPU with the open **Wan 2.1 T2V 1.3B** text-to-video model
-(Apache 2.0). Nothing is sent to a server; the model downloads once (~17 GB) into the Hugging Face cache.
+The own exercise animations (ids 121+) are 2-4 still poses turned into a catalog-style GIF
+(640x360, white background, ~670 ms per pose). Nothing here needs a GPU.
 
-## One-time setup (Windows, RTX 50-series → CUDA 12.8 build of PyTorch)
+Local diffusion models (video and SDXL + ControlNet) were tried and dropped: the output was not
+accurate enough for the exercises, and sustained GPU load crashed the laptop.
 
-```powershell
-py -3.12 -m venv $HOME\.venvs\move-ai
-$HOME\.venvs\move-ai\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-$HOME\.venvs\move-ai\Scripts\python -m pip install "diffusers>=0.33" transformers accelerate ftfy sentencepiece imageio imageio-ffmpeg pillow numpy
-```
+## Workflow (Gemini in a browser)
 
-## Generate
-
-```powershell
-$HOME\.venvs\move-ai\Scripts\python scripts\ai\generate-exercise-gif.py "Band pull-apart" `
-  "holding a resistance band in both hands at chest height with straight arms, she pulls the band apart sideways until it touches her chest, then slowly returns" `
-  --out out\band-pull-apart.gif --seed 7
-```
-
-Review the GIF/MP4. If it is good, copy it to `assets/exercises/<next id> <Name>.gif`,
-run `npm run generate:exercises`, and add it to a workout. Try other `--seed` values for variants.
-
-## Pose-controlled (recommended: the movement is exactly right)
-
-Text alone leaves the movement to the model. Instead, define it as key poses in `scripts/ai/pose.py`
-(OpenPose-style skeleton, eased between poses), check the skeleton preview, then let **Wan 2.1 VACE 1.3B**
-render a person following it. A frame of a bundled GIF is the reference, so the outfit and look match.
+1. Upload one frame of a bundled GIF (the woman in the black outfit) as the reference, plus -- when
+   the pose is hard to describe -- a stick-figure pose guide made with `plan_poses.py`
+   (`stick figure` drawing, see `standing_front()` / `with_()` there).
+2. Ask for each pose of the exercise in the same chat ("same woman, same framing, size and
+   position, pure white background, 16:9") so the figure stays consistent.
+3. Download each picture with Gemini's own Download button (it cannot be automated).
+4. Build the GIF and refresh the catalog:
 
 ```powershell
-$py = "$HOME\.venvs\move-ai\Scripts\python"
-& $py scripts\ai\pose.py band-pull-apart --out out\band-pull-apart-pose.gif        # check the form
-& $py scripts\ai\generate-pose-gif.py band-pull-apart "Band pull-apart" `
-  "pulling a light resistance band apart at chest height" --out out\band-pull-apart.gif
+$py = "$HOME\.venvs\move-ai\Scripts\python"   # any Python with Pillow + numpy
+& $py scripts\ai\stills-to-gif.py pose-a.jpg pose-b.jpg --out "assets\exercises\<id> <Name>.gif" --white 232
+npm run generate:exercises
 ```
 
-VACE shares the text encoder with the T2V model, so it only adds ~7 GB of weights.
+`stills-to-gif.py` crops every frame identically (so the figure does not jump), flattens the
+off-white background to pure white, and sizes the result like the bundled GIFs.
+
+Exercises named in the plan but not yet animated live in `src/data/extraExercises.ts` and show a
+placeholder until a GIF with their id exists.

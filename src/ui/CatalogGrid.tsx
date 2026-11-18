@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import {groupByCategory} from '../data/categories';
+import {t} from '../i18n';
 import type {Exercise} from '../data/exercises';
 
 type Section = {key: string; title: string; count: number; data: Exercise[][]};
@@ -59,7 +60,7 @@ export function CatalogGrid({
       stickySectionHeadersEnabled={false}
       renderSectionHeader={({section}) => (
         <Text style={styles.heading}>
-          {section.title} <Text style={styles.count}>{section.count}</Text>
+          {t(section.title)} <Text style={styles.count}>{section.count}</Text>
         </Text>
       )}
       renderItem={({item: row}) => (

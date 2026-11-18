@@ -22,6 +22,7 @@ type MoveStorageModule = {
   getSpeechSettings(): Promise<SpeechSettings>;
   setSpeechEngine(name: string): Promise<boolean>;
   setSpeechVoice(name: string): Promise<boolean>;
+  setSpeechLanguage(tag: string): Promise<boolean>;
   setSpeechRate(rate: number): Promise<boolean>;
 };
 
