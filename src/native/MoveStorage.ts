@@ -12,6 +12,7 @@ type MoveStorageModule = {
   getString(key: string): Promise<string | null>;
   setString(key: string, value: string): Promise<boolean>;
   exportCsv(fileName: string, csv: string): Promise<string>;
+  readImportFile(fileName: string): Promise<string | null>;
   speak(text: string): Promise<boolean>;
   countdownRoll(): Promise<boolean>;
   repChime(): Promise<boolean>;

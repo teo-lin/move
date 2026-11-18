@@ -1,3 +1,4 @@
+import {plainWorkoutName} from './history';
 import {importedWorkouts} from './importedWorkouts';
 
 export type Workout = {
@@ -178,6 +179,25 @@ export const workouts: Workout[] = [
 
 export function workoutLabel(workout: Pick<Workout, 'name' | 'emoji'>): string {
   return workout.emoji ? `${workout.emoji} ${workout.name}` : workout.name;
+}
+
+/** Older names of workouts that were renamed (matched without their emoji). */
+const renamedWorkouts: Record<string, string> = {
+  'PatruLabe: pect/lomb': 'PatruLabe: upper body', // renamed on 2024.06.26
+  'Patru Labe (pect+lomb)': 'PatruLabe: upper body',
+  'Patru Labe': 'PatruLabe: upper body',
+};
+
+/**
+ * Label used to group history in the stats: the current workout of that name, whatever emoji the
+ * session was recorded with, and renamed workouts folded into their current name. Names that match
+ * no workout keep their own label.
+ */
+export function groupedWorkoutLabel(name: string, list: Workout[] = workouts): string {
+  const plain = plainWorkoutName(name);
+  const current = renamedWorkouts[plain] ?? plain;
+  const match = list.find(workout => workout.name === current);
+  return match ? workoutLabel(match) : name;
 }
 
 /** Maps a stored history name (with or without emoji) to the current CSV label. */

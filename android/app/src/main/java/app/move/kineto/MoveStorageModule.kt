@@ -67,6 +67,18 @@ class MoveStorageModule(private val reactContext: ReactApplicationContext) :
   }
 
   /** Resolves when the utterance has finished (or was interrupted). */
+  /** Text of a file the user put in the app's own external folder (adb push), or null. */
+  @ReactMethod
+  fun readImportFile(fileName: String, promise: Promise) {
+    try {
+      val dir = reactApplicationContext.getExternalFilesDir(null)
+      val file = java.io.File(dir, fileName)
+      promise.resolve(if (file.isFile) file.readText(Charsets.UTF_8) else null)
+    } catch (error: Exception) {
+      promise.reject("import_failed", error)
+    }
+  }
+
   @ReactMethod
   fun speak(text: String, promise: Promise) {
     speech.speak(text) { promise.resolve(true) }

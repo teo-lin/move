@@ -250,3 +250,79 @@ test('exercises from the health plan are complete, categorised and do not clash 
     expect.arrayContaining(['balance', 'warmup', 'strength', 'stretch']),
   );
 });
+
+test('Back Exercises CSV rows are parsed and merged without duplicating existing sessions', () => {
+  const {parseBackExercisesCsv, mergeSessions} = require('../src/data/history');
+  const csv = [
+    '"Date","Workout","Completion","Duration"',
+    '"2026.11.07","🧞 Spate","4 / 13","01:04"',
+    '"2026.11.07","🦦 PeSpate: abs","16 / 16","14:44"',
+    '"2026.11.07","🦦 PeSpate: abs","16 / 16","14:44"',
+    '"bad","row"',
+  ].join(String.fromCharCode(10));
+  const incoming = parseBackExercisesCsv(csv);
+  expect(incoming).toHaveLength(3);
+  expect(incoming[0]).toMatchObject({
+    workout: '🧞 Spate',
+    completed: 4,
+    total: 13,
+    durationSeconds: 64,
+  });
+  const existing = [{...incoming[1], id: 'a', workout: 'PeSpate: abs'}];
+  const {merged, added} = mergeSessions(existing, incoming);
+  expect(added).toHaveLength(2); // one PeSpate is already there, the second equal one is new
+  expect(merged).toHaveLength(3);
+  expect(mergeSessions(merged, incoming).added).toHaveLength(0);
+  expect(toBackExercisesCsv(merged)).toContain('"2026.11.07"');
+});
+
+test('stats count this year and the average sessions per month since the first session', () => {
+  const {historyStats: statsOf} = require('../src/data/history');
+  const at = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).getTime();
+  const session = (id: string, timestamp: number) => ({
+    id,
+    timestamp,
+    workout: 'A',
+    completed: 1,
+    total: 1,
+    durationSeconds: 60,
+  });
+  const entries = [
+    session('1', at(2026, 1, 5)),
+    session('2', at(2026, 3, 5)),
+    session('3', at(2026, 3, 6)),
+    session('4', at(2025, 11, 20)),
+  ];
+  const stats = statsOf(entries, new Date(2026, 3, 15)); // 15 April 2026
+  expect(stats.thisYear).toBe(3);
+  expect(stats.perMonth).toBe(0.7); // 4 sessions over Nov 2025 .. Apr 2026 = 6 months
+  expect(statsOf([], new Date(2026, 3, 15)).perMonth).toBe(0);
+});
+
+test('imported names keep their emoji, are upgraded in place, and renamed workouts group together', () => {
+  const {
+    labelWithEmoji,
+    mergeSessions: merge,
+    parseBackExercisesCsv: parse,
+  } = require('../src/data/history');
+  const {groupedWorkoutLabel} = require('../src/data/workouts');
+  expect(labelWithEmoji('🦘Picioare ')).toBe('🦘 Picioare');
+  expect(labelWithEmoji('Healthy back')).toBe('Healthy back');
+
+  const csv = [
+    '"Date","Workout","Completion","Duration"',
+    '"2024.06.01","🦘Picioare","6 / 6","05:28"',
+  ].join(String.fromCharCode(10));
+  const [incoming] = parse(csv);
+  const old = {...incoming, workout: 'Picioare'}; // imported earlier without the emoji
+  const result = merge([old], [incoming]);
+  expect(result.added).toHaveLength(0);
+  expect(result.updated).toBe(1);
+  expect(result.merged[0].workout).toBe('🦘 Picioare');
+  expect(merge(result.merged, [incoming]).updated).toBe(0);
+
+  expect(groupedWorkoutLabel('🐈 PatruLabe: pect/lomb')).toBe('🐈 PatruLabe: upper body');
+  expect(groupedWorkoutLabel('Patru Labe (pect+lomb)')).toBe('🐈 PatruLabe: upper body');
+  expect(groupedWorkoutLabel('🐕 PeSpate: abs')).toBe('🦦 PeSpate: abs');
+  expect(groupedWorkoutLabel('🧞 Spate', [])).toBe('🧞 Spate');
+});

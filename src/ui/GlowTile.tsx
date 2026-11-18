@@ -21,7 +21,9 @@ export function GlowTile({
       resizeMethod="scale"
       resizeMode="cover">
       <Text style={styles.value}>{value}</Text>
-      <Text style={styles.label}>{t(label)}</Text>
+      <Text style={styles.label} numberOfLines={1}>
+        {t(label)}
+      </Text>
     </ImageBackground>
   );
 }
@@ -29,11 +31,11 @@ export function GlowTile({
 const styles = StyleSheet.create({
   tile: {
     flexGrow: 1,
-    flexBasis: '45%',
+    flexBasis: '28%',
     minHeight: 64,
     borderRadius: 12,
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     overflow: 'hidden',
     justifyContent: 'flex-end',
     borderWidth: StyleSheet.hairlineWidth * 2,
@@ -50,7 +52,7 @@ const styles = StyleSheet.create({
   },
   label: {
     color: '#2f3d48',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
 });

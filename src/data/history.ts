@@ -130,12 +130,20 @@ export function monthGrid(year: number, month: number): (Date | null)[][] {
   return weeks;
 }
 
-export type WorkoutStats = {workout: string; count: number; lastTimestamp: number; totalSeconds: number};
+export type WorkoutStats = {
+  workout: string;
+  count: number;
+  lastTimestamp: number;
+  totalSeconds: number;
+};
 
 export type HistoryStats = {
   total: number;
   thisWeek: number;
   thisMonth: number;
+  thisYear: number;
+  /** Sessions per calendar month, from the month of the first session up to the current one. */
+  perMonth: number;
   totalMinutes: number;
   activeDays: number;
   byWorkout: WorkoutStats[];
@@ -146,11 +154,15 @@ export function historyStats(entries: SessionEntry[], now: Date = new Date()): H
   const weekEnd = weekStart + 7 * DAY_MS;
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
+  const yearStart = new Date(now.getFullYear(), 0, 1).getTime();
+  const yearEnd = new Date(now.getFullYear() + 1, 0, 1).getTime();
   const byWorkout = new Map<string, WorkoutStats>();
   let totalSeconds = 0;
+  let firstTimestamp = Infinity;
 
   for (const entry of entries) {
     totalSeconds += entry.durationSeconds;
+    firstTimestamp = Math.min(firstTimestamp, entry.timestamp);
     const stats = byWorkout.get(entry.workout) ?? {
       workout: entry.workout,
       count: 0,
@@ -163,10 +175,21 @@ export function historyStats(entries: SessionEntry[], now: Date = new Date()): H
     byWorkout.set(entry.workout, stats);
   }
 
+  const first = new Date(firstTimestamp);
+  const months =
+    entries.length === 0
+      ? 1
+      : Math.max(
+          1,
+          (now.getFullYear() - first.getFullYear()) * 12 + now.getMonth() - first.getMonth() + 1,
+        );
+
   return {
     total: entries.length,
     thisWeek: entries.filter(e => e.timestamp >= weekStart && e.timestamp < weekEnd).length,
     thisMonth: entries.filter(e => e.timestamp >= monthStart && e.timestamp < monthEnd).length,
+    thisYear: entries.filter(e => e.timestamp >= yearStart && e.timestamp < yearEnd).length,
+    perMonth: Math.round((entries.length / months) * 10) / 10,
     totalMinutes: Math.round(totalSeconds / 60),
     activeDays: new Set(entries.map(e => localDateKey(e.timestamp))).size,
     byWorkout: [...byWorkout.values()].sort((a, b) => b.lastTimestamp - a.lastTimestamp),
@@ -198,4 +221,133 @@ function isSessionEntry(value: unknown): value is SessionEntry {
     typeof entry.total === 'number' &&
     typeof entry.durationSeconds === 'number'
   );
+}
+
+/** Workout name without a leading emoji / punctuation, so "🦦 PeSpate: abs" matches "PeSpate: abs". */
+export function plainWorkoutName(name: string): string {
+  return name.replace(/^[^A-Za-z0-9À-ɏ]+/, '').trim();
+}
+
+const NL = String.fromCharCode(10);
+const CR = String.fromCharCode(13);
+
+/** Splits one CSV text into rows of fields (handles quotes and doubled quotes). */
+function parseCsvRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+  const endRow = () => {
+    row.push(field);
+    field = '';
+    if (row.some(value => value !== '')) {
+      rows.push(row);
+    }
+    row = [];
+  };
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quoted) {
+      if (char === '"' && text[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ',') {
+      row.push(field);
+      field = '';
+    } else if (char === NL || char === CR) {
+      if (char === CR && text[i + 1] === NL) {
+        i++;
+      }
+      endRow();
+    } else {
+      field += char;
+    }
+  }
+  endRow();
+  return rows;
+}
+
+/**
+ * Reads a Back Exercises style CSV (`Date,Workout,Completion,Duration`, dates `yyyy.MM.dd`,
+ * completion `done / total`, duration `mm:ss` or `h:mm:ss`) into sessions at noon of that day.
+ * Rows that do not parse are skipped.
+ */
+export function parseBackExercisesCsv(text: string): SessionEntry[] {
+  const entries: SessionEntry[] = [];
+  const counters = new Map<string, number>();
+  for (const [date, workout, completion, duration] of parseCsvRows(text).slice(1)) {
+    const day = /^(\d{4})[.-](\d{2})[.-](\d{2})$/.exec((date ?? '').trim());
+    const done = /^(\d+)\s*\/\s*(\d+)$/.exec((completion ?? '').trim());
+    const time = /^(?:(\d+):)?(\d{1,2}):(\d{2})$/.exec((duration ?? '').trim());
+    if (!day || !done || !time || !workout?.trim()) {
+      continue;
+    }
+    const seconds = Number(time[1] ?? 0) * 3600 + Number(time[2]) * 60 + Number(time[3]);
+    const dayKey = `${day[1]}.${day[2]}.${day[3]}`;
+    const index = counters.get(dayKey) ?? 0;
+    counters.set(dayKey, index + 1);
+    entries.push({
+      id: `import-${dayKey}-${index}`,
+      timestamp: new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]), 12, 0, 0).getTime(),
+      workout: labelWithEmoji(workout),
+      completed: Number(done[1]),
+      total: Number(done[2]),
+      durationSeconds: seconds,
+    });
+  }
+  return entries;
+}
+
+/** "🧞Spate" -> "🧞 Spate": keeps a leading emoji (one space after it), or the plain name. */
+export function labelWithEmoji(name: string): string {
+  const plain = plainWorkoutName(name);
+  const prefix = name.slice(0, name.indexOf(plain)).trim();
+  return prefix ? `${prefix} ${plain}` : plain;
+}
+
+function sessionKey(entry: SessionEntry): string {
+  return [
+    formatCsvDate(entry.timestamp),
+    plainWorkoutName(entry.workout),
+    entry.completed,
+    entry.total,
+    Math.round(entry.durationSeconds),
+  ].join('|');
+}
+
+/**
+ * Adds the incoming sessions the history does not have yet. Identical sessions are compared by
+ * date, workout, completion and duration, and counted, so two equal sessions on one day stay two.
+ */
+export function mergeSessions(
+  existing: SessionEntry[],
+  incoming: SessionEntry[],
+): {merged: SessionEntry[]; added: SessionEntry[]; updated: number} {
+  const have = new Map<string, SessionEntry[]>();
+  for (const entry of existing) {
+    const key = sessionKey(entry);
+    have.set(key, [...(have.get(key) ?? []), entry]);
+  }
+  const added: SessionEntry[] = [];
+  const renamed = new Map<string, string>(); // id -> label with emoji
+  for (const entry of incoming) {
+    const key = sessionKey(entry);
+    const match = have.get(key)?.shift();
+    if (!match) {
+      added.push(entry);
+    } else if (match.id.startsWith('import-') && match.workout !== entry.workout) {
+      renamed.set(match.id, entry.workout); // an earlier import without the emoji
+    }
+  }
+  const kept = existing.map(entry =>
+    renamed.has(entry.id) ? {...entry, workout: renamed.get(entry.id) as string} : entry,
+  );
+  return {merged: sortNewestFirst([...kept, ...added]), added, updated: renamed.size};
 }

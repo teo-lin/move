@@ -31,6 +31,7 @@ import {
 import {
   breatherStep,
   csvWorkoutLabel,
+  groupedWorkoutLabel,
   exerciseCount,
   mergeSavedWorkouts,
   serializeWorkoutSettings,
@@ -53,6 +54,8 @@ import {
   historyKey,
   historyStats,
   localDateKey,
+  mergeSessions,
+  parseBackExercisesCsv,
   parseHistory,
   serializeHistory,
   SessionEntry,
@@ -439,6 +442,33 @@ export default function App(): React.JSX.Element {
   async function saveHistory(nextHistory: SessionEntry[]) {
     setHistory(nextHistory);
     await MoveStorage.setString(historyKey, serializeHistory(nextHistory));
+  }
+
+  async function importSessions() {
+    try {
+      const text = await MoveStorage.readImportFile('import-sessions.csv');
+      if (!text) {
+        Alert.alert(t('Nothing to import'), t('Put import-sessions.csv in the app folder first.'));
+        return;
+      }
+      const {merged, added, updated} = mergeSessions(history, parseBackExercisesCsv(text));
+      if (added.length === 0 && updated > 0) {
+        await saveHistory(merged);
+        Alert.alert(
+          t('Updated'),
+          t('{count} sessions got their workout name updated.', {count: updated}),
+        );
+        return;
+      }
+      if (added.length === 0) {
+        Alert.alert(t('Nothing new'), t('All sessions in the file are already in History.'));
+        return;
+      }
+      await saveHistory(merged);
+      Alert.alert(t('Imported'), t('{count} sessions added to History.', {count: added.length}));
+    } catch (error) {
+      Alert.alert(t('Could not import'), String(error));
+    }
   }
 
   function startWorkout(workout: Workout) {
@@ -1034,7 +1064,7 @@ export default function App(): React.JSX.Element {
               const rowProps = workoutDrag.getRowProps(index);
               const label = workoutLabel(workout);
               const done = history.filter(
-                entry => csvWorkoutLabel(entry.workout, workouts) === label,
+                entry => groupedWorkoutLabel(entry.workout, workouts) === label,
               );
               const last = done.reduce((latest, entry) => Math.max(latest, entry.timestamp), 0);
               return (
@@ -1414,6 +1444,18 @@ export default function App(): React.JSX.Element {
               />
             </View>
           ) : null}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>{t('Import sessions')}</Text>
+            <Text style={styles.meta}>
+              {t('Adds sessions from import-sessions.csv (Back Exercises format) to History.')}
+            </Text>
+            <PastelButton
+              label="Import"
+              icon="symbolDownload"
+              color={pastels.sky}
+              onPress={importSessions}
+            />
+          </View>
           <VoiceSettings />
         </ScrollView>
       )}
@@ -1569,7 +1611,7 @@ function workoutTint(index: number, lightness = 91, saturation = 70): string {
 
 /** Index of the workout a history label belongs to (-1 if it no longer exists). */
 function workoutIndexFor(label: string, list: Workout[]): number {
-  const csv = csvWorkoutLabel(label, list);
+  const csv = groupedWorkoutLabel(label, list);
   return list.findIndex(workout => workoutLabel(workout) === csv);
 }
 
@@ -1668,7 +1710,7 @@ function StatsScreen({
   const stats = historyStats(
     history.map(entry => ({
       ...entry,
-      workout: csvWorkoutLabel(entry.workout, workouts),
+      workout: groupedWorkoutLabel(entry.workout, workouts),
     })),
   );
   const maxCount = Math.max(1, ...stats.byWorkout.map(item => item.count));
@@ -1693,8 +1735,10 @@ function StatsScreen({
       <View style={styles.statGrid}>
         <GlowTile label="This week" value={stats.thisWeek} texture={tileBackgrounds.mint} />
         <GlowTile label="This month" value={stats.thisMonth} texture={tileBackgrounds.sky} />
-        <GlowTile label="Sessions" value={stats.total} texture={tileBackgrounds.peach} />
-        <GlowTile label="Minutes" value={stats.totalMinutes} texture={tileBackgrounds.lilac} />
+        <GlowTile label="This year" value={stats.thisYear} texture={tileBackgrounds.peach} />
+        <GlowTile label="Sessions" value={stats.total} texture={tileBackgrounds.lilac} />
+        <GlowTile label="Minutes" value={stats.totalMinutes} texture={tileBackgrounds.mint} />
+        <GlowTile label="Avg / month" value={stats.perMonth} texture={tileBackgrounds.sky} />
       </View>
       {stats.byWorkout.length === 0 ? (
         <Text style={styles.meta}>{t('No completed sessions yet.')}</Text>

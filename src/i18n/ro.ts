@@ -159,7 +159,25 @@ export const ro: Record<string, string> = {
   'Share CSV': 'Trimite CSV',
   'This week': 'Săptămâna aceasta',
   'This month': 'Luna aceasta',
+  'This year': 'Anul acesta',
+  'Avg / month': 'Medie / lună',
   Sessions: 'Sesiuni',
   Minutes: 'Minute',
   'last {date} · {minutes} min in total': 'ultima dată {date} · {minutes} min în total',
+  'Nothing to import': 'Nimic de importat',
+  'Put import-sessions.csv in the app folder first.':
+    'Pune mai întâi fișierul import-sessions.csv în folderul aplicației.',
+  'Nothing new': 'Nimic nou',
+  'All sessions in the file are already in History.':
+    'Toate sesiunile din fișier există deja în Istoric.',
+  Imported: 'Importat',
+  Updated: 'Actualizat',
+  '{count} sessions got their workout name updated.':
+    '{count} sesiuni și-au actualizat numele antrenamentului.',
+  '{count} sessions added to History.': '{count} sesiuni adăugate în Istoric.',
+  'Could not import': 'Nu am putut importa',
+  'Import sessions': 'Importă sesiuni',
+  'Adds sessions from import-sessions.csv (Back Exercises format) to History.':
+    'Adaugă în Istoric sesiunile din import-sessions.csv (format Back Exercises).',
+  Import: 'Importă',
 };
